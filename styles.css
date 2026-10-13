@@ -8,6 +8,12 @@ h1 { margin: 8px 0; font-size: 40px; }
 .card { border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-top: 24px; }
 label { display: block; font-size: 13px; margin-bottom: 8px; color: var(--muted); }
 textarea { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; font: inherit; }
+select, input[type="password"] { padding: 10px; border: 1px solid var(--border); border-radius: 8px; font: inherit; }
+select { flex: 0 0 auto; }
+input[type="password"] { flex: 1; min-width: 0; }
+.hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+#livePanels h3 { font-size: 14px; margin: 16px 0 6px; }
+#livePanels ul { margin: 0 0 8px; padding-left: 20px; font-size: 14px; }
 button { margin-top: 12px; padding: 10px 18px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
 .row { display: flex; gap: 10px; margin-top: 4px; }
 .row button + button { background: #fff; color: var(--accent); border: 1px solid var(--accent); }

@@ -28,6 +28,14 @@
     <section class="card">
       <label for="input">Product page URL or description</label>
       <textarea id="input" rows="4" placeholder="Paste a product URL or a short product description…">Acme Trail Backpack 25L — waterproof, laptop sleeve, 1.2kg, $89. Free returns.</textarea>
+      <div class="row">
+        <select id="provider" aria-label="Model provider">
+          <option value="gemini">Gemini</option>
+          <option value="openai">OpenAI</option>
+        </select>
+        <input id="apiKey" type="password" placeholder="API key (stored in this browser only)" autocomplete="off" />
+      </div>
+      <p class="hint" id="status">No API key — runs mock audit. Add a key for live research + audit + page generation.</p>
       <button id="run">Run MEO audit</button>
     </section>
 
@@ -39,6 +47,14 @@
         <div class="score"><strong id="overall">—</strong><span>MEO score</span></div>
       </div>
       <ul id="fixes"></ul>
+      <div id="livePanels">
+        <h3>Research — USPs</h3>
+        <ul id="usps"></ul>
+        <h3>Keyword map</h3>
+        <ul id="keywords"></ul>
+        <h3>Brand language</h3>
+        <p class="hint" id="brand">—</p>
+      </div>
       <div class="row">
         <button id="openTab" type="button">Open in new tab</button>
         <button id="exportHtml" type="button">Export HTML</button>
@@ -49,6 +65,13 @@
       <p>MEO Engine prototype · static page, Vercel-ready.</p>
     </footer>
   </main>
+  <script src="providers/gemini.js"></script>
+  <script src="providers/openai.js"></script>
+  <script src="providers/chat.js"></script>
+  <script src="research.js"></script>
+  <script src="audit.js"></script>
+  <script src="brand.js"></script>
+  <script src="generate.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1,10 +1,64 @@
-// MEO Engine prototype — mock audit + standalone page open/export.
+// MEO Engine — pipeline wiring (mock fallback + live provider tracks).
+window.MEO = window.MEO || {};
 let lastAudit = null;
+let lastGeneratedHtml = null;
+
+const $ = (id) => document.getElementById(id);
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   }[c]));
+}
+
+// --- provider + key storage (per provider, localStorage only) ---
+function getProvider() { return $("provider").value || "gemini"; }
+function getKey() { return $("apiKey").value.trim(); }
+function savePrefs() {
+  try {
+    localStorage.setItem("meo.provider", getProvider());
+    localStorage.setItem("meo.key." + getProvider(), getKey());
+  } catch (e) { /* private mode */ }
+}
+function loadPrefs() {
+  try {
+    const p = localStorage.getItem("meo.provider");
+    if (p) $("provider").value = p;
+    $("apiKey").value = localStorage.getItem("meo.key." + getProvider()) || "";
+  } catch (e) { /* ignore */ }
+  refreshHint();
+}
+function refreshHint() {
+  $("status").textContent = getKey()
+    ? `Live mode — ${getProvider()} key set. Runs research + audit + page generation.`
+    : "No API key — runs mock audit. Add a key for live research + audit + page generation.";
+}
+
+// chatFn adapters (lanes disagree: research/audit take messages[], brand/generate take a string)
+function chatMessages(messages) {
+  return window.MEO.chat({ provider: getProvider(), key: getKey(), messages });
+}
+function chatPrompt(prompt) {
+  return window.MEO.chat({ provider: getProvider(), key: getKey(), messages: [{ role: "user", content: prompt }] });
+}
+
+// --- mock fallback (no key): same behavior as before ---
+function mockAudit(raw) {
+  const text = raw.toLowerCase();
+  let geo = 62, aeo = 58;
+  if (text.includes("faq") || text.includes("?")) aeo += 12;
+  if (text.includes("$") || text.includes("price")) geo += 8;
+  if (text.includes("schema") || text.includes("review")) { geo += 6; aeo += 6; }
+  if (text.length > 120) { geo += 5; aeo += 5; }
+  geo = Math.min(98, geo); aeo = Math.min(98, aeo);
+  return {
+    input: raw, geo, aeo, overall: Math.round((geo + aeo) / 2),
+    fixes: [
+      "Add Product + FAQ JSON-LD schema (citation-ready facts).",
+      "Add a 3-question FAQ block answering price / fit / returns.",
+      "Put key specs in the first 100 words for answer engines.",
+    ],
+  };
 }
 
 function buildStandaloneHTML(audit) {
@@ -54,54 +108,109 @@ ${fixes}
 </html>`;
 }
 
-document.getElementById("run").addEventListener("click", () => {
-  const raw = document.getElementById("input").value;
-  const text = raw.toLowerCase();
-  let geo = 62, aeo = 58;
-  if (text.includes("faq") || text.includes("?")) aeo += 12;
-  if (text.includes("$") || text.includes("price")) geo += 8;
-  if (text.includes("schema") || text.includes("review")) { geo += 6; aeo += 6; }
-  if (text.length > 120) { geo += 5; aeo += 5; }
-  geo = Math.min(98, geo); aeo = Math.min(98, aeo);
-  const overall = Math.round((geo + aeo) / 2);
-
-  document.getElementById("geo").textContent = geo;
-  document.getElementById("aeo").textContent = aeo;
-  document.getElementById("overall").textContent = overall;
-
-  const fixes = [
-    "Add Product + FAQ JSON-LD schema (citation-ready facts).",
-    "Add a 3-question FAQ block answering price / fit / returns.",
-    "Put key specs in the first 100 words for answer engines.",
-  ];
-  const ul = document.getElementById("fixes");
+function renderAudit(audit) {
+  $("geo").textContent = audit.geo;
+  $("aeo").textContent = audit.aeo;
+  $("overall").textContent = audit.overall;
+  const ul = $("fixes");
   ul.innerHTML = "";
-  fixes.forEach((f) => {
+  audit.fixes.forEach((f) => {
     const li = document.createElement("li");
-    li.textContent = f;
+    li.textContent = typeof f === "string" ? f : (f.fix || f.label || JSON.stringify(f));
     ul.appendChild(li);
   });
-  document.getElementById("results").classList.remove("hidden");
+  $("results").classList.remove("hidden");
+}
 
-  lastAudit = { input: raw, geo, aeo, overall, fixes };
+function renderLive(research, audit, brand) {
+  const usps = $("usps");
+  usps.innerHTML = "";
+  (research.usps || []).forEach((u) => {
+    const li = document.createElement("li");
+    li.textContent = u;
+    usps.appendChild(li);
+  });
+  const kws = $("keywords");
+  kws.innerHTML = "";
+  (audit.keywords || []).forEach((k) => {
+    const li = document.createElement("li");
+    li.textContent = typeof k === "string" ? k : `${k.term} — ${k.intent || ""} [${k.place || ""}]`;
+    kws.appendChild(li);
+  });
+  $("brand").textContent = `Colors ${(brand.colors || []).join(", ")} · Fonts ${(brand.fonts || []).join(" | ")} · Tone ${(brand.tone || []).join(", ")} · ${brand.spacing || ""}`;
+}
+
+function setStatus(t) { $("status").textContent = t; }
+
+async function runPipeline(raw) {
+  // Tracks 1+3 in parallel, then audit (needs research), then generate.
+  setStatus("Research + brand tracks running…");
+  const [research, brand] = await Promise.all([
+    window.MEO.runResearch(chatMessages, raw),
+    window.MEO.extractBrand(chatPrompt, raw),
+  ]);
+  setStatus("Audit track running…");
+  const auditRaw = await window.MEO.runAudit(chatMessages, raw, JSON.stringify(research).slice(0, 2000));
+  const audit = {
+    input: raw,
+    geo: auditRaw.score,
+    aeo: Math.round(auditRaw.checks.reduce((s, c) => s + c.score, 0) / Math.max(1, auditRaw.checks.length)),
+    overall: auditRaw.score,
+    fixes: auditRaw.checks.map((c) => c.fix),
+    keywords: auditRaw.keywords,
+  };
+  renderAudit(audit);
+  renderLive(research, auditRaw, brand);
+  lastAudit = audit;
+  setStatus("Generating optimized page…");
+  lastGeneratedHtml = await window.MEO.runGenerate(chatPrompt, research, auditRaw, brand);
+  setStatus(`Done — live ${getProvider()} run. Open in new tab or Export the generated page.`);
+}
+
+$("provider").addEventListener("change", () => {
+  try { $("apiKey").value = localStorage.getItem("meo.key." + getProvider()) || ""; } catch (e) { $("apiKey").value = ""; }
+  refreshHint();
+});
+$("apiKey").addEventListener("input", () => { savePrefs(); refreshHint(); });
+
+$("run").addEventListener("click", async () => {
+  const raw = $("input").value;
+  savePrefs();
+  lastGeneratedHtml = null;
+  if (!getKey()) {
+    lastAudit = mockAudit(raw);
+    renderAudit(lastAudit);
+    setStatus("Mock audit shown (no key). Open in new tab or Export it, or add a key for the live engine.");
+    return;
+  }
+  try {
+    await runPipeline(raw);
+  } catch (e) {
+    setStatus("Live run failed: " + (e && e.message ? e.message.slice(0, 300) : e));
+  }
 });
 
-document.getElementById("openTab").addEventListener("click", () => {
-  if (!lastAudit) return;
-  const blob = new Blob([buildStandaloneHTML(lastAudit)], { type: "text/html" });
-  window.open(URL.createObjectURL(blob), "_blank", "noopener");
+function currentHtml() {
+  if (lastGeneratedHtml) return lastGeneratedHtml;
+  if (lastAudit) return buildStandaloneHTML(lastAudit);
+  return null;
+}
+
+$("openTab").addEventListener("click", () => {
+  const html = currentHtml();
+  if (!html) return;
+  window.open(URL.createObjectURL(new Blob([html], { type: "text/html" })), "_blank", "noopener");
 });
 
-document.getElementById("exportHtml").addEventListener("click", () => {
-  if (!lastAudit) return;
-  const blob = new Blob([buildStandaloneHTML(lastAudit)], { type: "text/html" });
+$("exportHtml").addEventListener("click", () => {
+  const html = currentHtml();
+  if (!html) return;
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
+  a.href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
   a.download = "meo-optimized-page.html";
   document.body.appendChild(a);
   a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(a.href);
-    a.remove();
-  }, 1000);
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 });
+
+loadPrefs();
