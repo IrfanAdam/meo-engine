@@ -17,15 +17,25 @@ window.MEO.providers.gemini = async function (key, messages) {
   var lastErr = null;
   for (var attempt = 1; attempt <= 3; attempt++) {
     var res;
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, 45000);
     try {
       res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contents: contents }),
+        signal: ctrl.signal,
       });
     } catch (netErr) {
+      clearTimeout(timer);
+      if (netErr && netErr.name === "AbortError") {
+        lastErr = "MEO gemini: timed out after 45s (attempt " + attempt + "/3)";
+        if (attempt < 3) { await new Promise(function (r) { setTimeout(r, attempt * 3000); }); continue; }
+        throw new Error(lastErr + " — the model is very slow right now, try again later.");
+      }
       throw netErr; // network blocked — app.js explains (file:// vs serve)
     }
+    clearTimeout(timer);
     if (res.ok) {
       var data = await res.json();
       var parts =

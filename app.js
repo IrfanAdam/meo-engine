@@ -154,6 +154,18 @@ function resetSteps() {
   ["research", "brand", "audit", "generate"].forEach((n) => setStep(n, "", "idle"));
 }
 
+// Live elapsed ticker for the running step: "calling gemini… 12s"
+function tickStep(name, base) {
+  const t0 = Date.now();
+  const id = setInterval(() => {
+    const li = document.querySelector(`#steps li[data-step="${name}"]`);
+    if (!li || li.dataset.state !== "active") { clearInterval(id); return; }
+    const s = li.querySelector(".step-sub");
+    if (s) s.textContent = `${base} ${Math.round((Date.now() - t0) / 1000)}s…`;
+  }, 1000);
+  return () => clearInterval(id);
+}
+
 function friendlyError(e) {
   const msg = (e && e.message ? e.message : String(e)) || "unknown error";
   if (/load failed|failed to fetch|networkerror|network request failed/i.test(msg)) {
@@ -163,37 +175,33 @@ function friendlyError(e) {
 }
 
 async function runPipeline(raw) {
-  // Tracks 1+3 in parallel, then audit (needs research), then generate.
+  // Tracks 1+3 truly in parallel, then audit (needs research), then generate.
   resetSteps();
   const provider = getProvider();
   setStep("research", "active", `calling ${provider}…`);
   setStep("brand", "active", `calling ${provider}…`);
-  setStatus("Research + brand tracks running…");
-  let research, brand;
-  try {
-    research = await window.MEO.runResearch(chatMessages, raw);
-    setStep("research", "done", `${(research.usps || []).length} USPs · ${(research.keywords || []).length} keywords`);
-  } catch (e) {
-    setStep("research", "error", friendlyError(e));
-    throw e;
-  }
-  try {
-    brand = await window.MEO.extractBrand(chatPrompt, raw);
-    setStep("brand", "done", (brand.colors || []).slice(0, 3).join(" ") || "tokens parsed");
-  } catch (e) {
-    // brand ran in parallel conceptually; if research already done, still surface brand error
-    setStep("brand", "error", friendlyError(e));
-    throw e;
-  }
-  // NOTE: research+brand awaited sequentially above so each step reports its own
-  // error precisely; wall-clock cost is the same class (both single LLM calls).
+  const stopR = tickStep("research", `calling ${provider}…`);
+  const stopB = tickStep("brand", `calling ${provider}…`);
+  setStatus("Research + brand tracks running in parallel…");
+  const pR = window.MEO.runResearch(chatMessages, raw).then(
+    (r) => { stopR(); setStep("research", "done", `${(r.usps || []).length} USPs · ${(r.keywords || []).length} keywords`); return r; },
+    (e) => { stopR(); setStep("research", "error", friendlyError(e)); throw e; }
+  );
+  const pB = window.MEO.extractBrand(chatPrompt, raw).then(
+    (b) => { stopB(); setStep("brand", "done", (b.colors || []).slice(0, 3).join(" ") || "tokens parsed"); return b; },
+    (e) => { stopB(); setStep("brand", "error", friendlyError(e)); throw e; }
+  );
+  const [research, brand] = await Promise.all([pR, pB]);
   setStep("audit", "active", `scoring vs GEO/AEO checks…`);
+  const stopA = tickStep("audit", "scoring vs GEO/AEO checks…");
   setStatus("Audit track running…");
   let auditRaw;
   try {
     auditRaw = await window.MEO.runAudit(chatMessages, raw, JSON.stringify(research).slice(0, 2000));
+    stopA();
     setStep("audit", "done", `score ${auditRaw.score} · ${auditRaw.checks.length} checks · ${auditRaw.keywords.length} keywords`);
   } catch (e) {
+    stopA();
     setStep("audit", "error", friendlyError(e));
     throw e;
   }
@@ -209,11 +217,14 @@ async function runPipeline(raw) {
   renderLive(research, auditRaw, brand);
   lastAudit = audit;
   setStep("generate", "active", "writing standalone HTML…");
+  const stopG = tickStep("generate", "writing standalone HTML…");
   setStatus("Generating optimized page…");
   try {
     lastGeneratedHtml = await window.MEO.runGenerate(chatPrompt, research, auditRaw, brand);
+    stopG();
     setStep("generate", "done", `${(lastGeneratedHtml.length / 1024).toFixed(1)} KB page ready`);
   } catch (e) {
+    stopG();
     setStep("generate", "error", friendlyError(e));
     throw e;
   }
