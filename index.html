@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MEO Engine — Multi-Engine Optimization</title>
+  <meta name="description" content="MEO Engine prototype: GEO + AEO audits for product pages." />
+  <link rel="stylesheet" href="styles.css" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    "name": "Demo Product — MEO Audit Sample",
+    "description": "Sample product used by the MEO Engine prototype to demonstrate GEO/AEO checks.",
+    "brand": { "@type": "Brand", "name": "MEO Demo" },
+    "offers": { "@type": "Offer", "price": "49.00", "priceCurrency": "USD", "availability": "https://schema.org/InStock" }
+  }
+  </script>
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <p class="kicker">Prototype</p>
+      <h1>MEO Engine</h1>
+      <p class="sub">Multi-Engine Optimization — GEO + AEO audits for product pages.</p>
+    </header>
+
+    <section class="card">
+      <label for="input">Product page URL or description</label>
+      <textarea id="input" rows="4" placeholder="Paste a product URL or a short product description…">Acme Trail Backpack 25L — waterproof, laptop sleeve, 1.2kg, $89. Free returns.</textarea>
+      <button id="run">Run MEO audit</button>
+    </section>
+
+    <section class="card hidden" id="results">
+      <h2>Audit results <span class="demo-tag">demo data</span></h2>
+      <div class="scores">
+        <div class="score"><strong id="geo">—</strong><span>GEO score</span></div>
+        <div class="score"><strong id="aeo">—</strong><span>AEO score</span></div>
+        <div class="score"><strong id="overall">—</strong><span>MEO score</span></div>
+      </div>
+      <ul id="fixes"></ul>
+    </section>
+
+    <footer>
+      <p>MEO Engine prototype · static page, Vercel-ready.</p>
+    </footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
