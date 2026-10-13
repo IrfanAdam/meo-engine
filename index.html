@@ -37,6 +37,12 @@
       </div>
       <p class="hint" id="status">No API key — runs mock audit. Add a key for live research + audit + page generation.</p>
       <button id="run">Run MEO audit</button>
+      <ol id="steps">
+        <li data-step="research"><span class="dot"></span><div><strong>Research</strong><small class="step-sub">idle</small></div></li>
+        <li data-step="brand"><span class="dot"></span><div><strong>Brand</strong><small class="step-sub">idle</small></div></li>
+        <li data-step="audit"><span class="dot"></span><div><strong>Audit</strong><small class="step-sub">idle</small></div></li>
+        <li data-step="generate"><span class="dot"></span><div><strong>Generate</strong><small class="step-sub">idle</small></div></li>
+      </ol>
     </section>
 
     <section class="card hidden" id="results">

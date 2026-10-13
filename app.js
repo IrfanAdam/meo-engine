@@ -142,15 +142,61 @@ function renderLive(research, audit, brand) {
 
 function setStatus(t) { $("status").textContent = t; }
 
+function setStep(name, state, sub) {
+  const li = document.querySelector(`#steps li[data-step="${name}"]`);
+  if (!li) return;
+  li.dataset.state = state;
+  const s = li.querySelector(".step-sub");
+  if (s && sub != null) s.textContent = sub;
+}
+
+function resetSteps() {
+  ["research", "brand", "audit", "generate"].forEach((n) => setStep(n, "", "idle"));
+}
+
+function friendlyError(e) {
+  const msg = (e && e.message ? e.message : String(e)) || "unknown error";
+  if (/load failed|failed to fetch|networkerror|network request failed/i.test(msg)) {
+    return "Network request blocked. Check your connection, then try serving over http (`npx serve .` in the repo folder) instead of file:// — browsers/AdBlock often block API calls from file pages. Raw: " + msg.slice(0, 200);
+  }
+  return msg.slice(0, 300);
+}
+
 async function runPipeline(raw) {
   // Tracks 1+3 in parallel, then audit (needs research), then generate.
+  resetSteps();
+  const provider = getProvider();
+  setStep("research", "active", `calling ${provider}…`);
+  setStep("brand", "active", `calling ${provider}…`);
   setStatus("Research + brand tracks running…");
-  const [research, brand] = await Promise.all([
-    window.MEO.runResearch(chatMessages, raw),
-    window.MEO.extractBrand(chatPrompt, raw),
-  ]);
+  let research, brand;
+  try {
+    research = await window.MEO.runResearch(chatMessages, raw);
+    setStep("research", "done", `${(research.usps || []).length} USPs · ${(research.keywords || []).length} keywords`);
+  } catch (e) {
+    setStep("research", "error", friendlyError(e));
+    throw e;
+  }
+  try {
+    brand = await window.MEO.extractBrand(chatPrompt, raw);
+    setStep("brand", "done", (brand.colors || []).slice(0, 3).join(" ") || "tokens parsed");
+  } catch (e) {
+    // brand ran in parallel conceptually; if research already done, still surface brand error
+    setStep("brand", "error", friendlyError(e));
+    throw e;
+  }
+  // NOTE: research+brand awaited sequentially above so each step reports its own
+  // error precisely; wall-clock cost is the same class (both single LLM calls).
+  setStep("audit", "active", `scoring vs GEO/AEO checks…`);
   setStatus("Audit track running…");
-  const auditRaw = await window.MEO.runAudit(chatMessages, raw, JSON.stringify(research).slice(0, 2000));
+  let auditRaw;
+  try {
+    auditRaw = await window.MEO.runAudit(chatMessages, raw, JSON.stringify(research).slice(0, 2000));
+    setStep("audit", "done", `score ${auditRaw.score} · ${auditRaw.checks.length} checks · ${auditRaw.keywords.length} keywords`);
+  } catch (e) {
+    setStep("audit", "error", friendlyError(e));
+    throw e;
+  }
   const audit = {
     input: raw,
     geo: auditRaw.score,
@@ -162,9 +208,16 @@ async function runPipeline(raw) {
   renderAudit(audit);
   renderLive(research, auditRaw, brand);
   lastAudit = audit;
+  setStep("generate", "active", "writing standalone HTML…");
   setStatus("Generating optimized page…");
-  lastGeneratedHtml = await window.MEO.runGenerate(chatPrompt, research, auditRaw, brand);
-  setStatus(`Done — live ${getProvider()} run. Open in new tab or Export the generated page.`);
+  try {
+    lastGeneratedHtml = await window.MEO.runGenerate(chatPrompt, research, auditRaw, brand);
+    setStep("generate", "done", `${(lastGeneratedHtml.length / 1024).toFixed(1)} KB page ready`);
+  } catch (e) {
+    setStep("generate", "error", friendlyError(e));
+    throw e;
+  }
+  setStatus(`Done — live ${provider} run. Open in new tab or Export the generated page.`);
 }
 
 $("provider").addEventListener("change", () => {
@@ -178,6 +231,8 @@ $("run").addEventListener("click", async () => {
   savePrefs();
   lastGeneratedHtml = null;
   if (!getKey()) {
+    resetSteps();
+    ["research", "brand", "audit", "generate"].forEach((n) => setStep(n, "done", "mock — no key"));
     lastAudit = mockAudit(raw);
     renderAudit(lastAudit);
     setStatus("Mock audit shown (no key). Open in new tab or Export it, or add a key for the live engine.");
@@ -186,7 +241,7 @@ $("run").addEventListener("click", async () => {
   try {
     await runPipeline(raw);
   } catch (e) {
-    setStatus("Live run failed: " + (e && e.message ? e.message.slice(0, 300) : e));
+    setStatus("Live run failed: " + friendlyError(e));
   }
 });
 

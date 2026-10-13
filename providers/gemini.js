@@ -10,7 +10,7 @@ window.MEO.providers.gemini = async function (key, messages) {
   var contents = messages.map(function (m) {
     return { role: "user", parts: [{ text: String(m.content) }] };
   });
-  var MEO_GEMINI_MODEL = (window.MEO && window.MEO.geminiModel) || "gemini-3.8-flash";
+  var MEO_GEMINI_MODEL = "gemini-3.8-flash";
   var url =
     "https://generativelanguage.googleapis.com/v1beta/models/" + MEO_GEMINI_MODEL + ":generateContent?key=" +
     encodeURIComponent(key);
