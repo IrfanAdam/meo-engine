@@ -188,6 +188,9 @@ function tickStep(name, base) {
 function friendlyError(e) {
   const msg = (e && e.message ? e.message : String(e)) || "unknown error";
   if (/load failed|failed to fetch|networkerror|network request failed/i.test(msg)) {
+    if (getProvider() === "openai") {
+      return "OpenAI blocks direct calls from browser pages (no CORS support) — your key is fine, but this static build can't reach api.openai.com. Use Gemini or Anthropic here, or put OpenAI behind a tiny proxy. Raw: " + msg.slice(0, 200);
+    }
     return "Network request blocked. Check your connection, then try serving over http (`npx serve .` in the repo folder) instead of file:// — browsers/AdBlock often block API calls from file pages. Raw: " + msg.slice(0, 200);
   }
   return msg.slice(0, 300);

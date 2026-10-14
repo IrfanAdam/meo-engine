@@ -35,10 +35,20 @@
     var facts = asList(research.facts);
     var images = asList(research.images);
     var keywords = fmtKeywords(audit);
-    var colors = asList(brand.colors).join(', ') || '(unspecified)';
-    var fonts = asList(brand.fonts).join(' | ') || '(unspecified)';
+    var colors = asList(brand.colors);
+    var fonts = asList(brand.fonts);
     var tone = asList(brand.tone).join(', ') || '(unspecified)';
     var spacing = brand.spacing || '(unspecified)';
+    // Deterministic token contract: the page CSS is injected by the engine
+    // (see buildBrandCss), so the model MUST style via these variables.
+    var tokenDefs = colors.map(function (c, i) { return '--b' + i + ': ' + c; });
+    if (fonts.length) tokenDefs.push('--f0: ' + fonts.join(', '));
+    var tokenBlock = tokenDefs.length
+      ? ':root { ' + tokenDefs.join('; ') + '; }'
+      : ':root { --b0: #1a1a1a; --b1: #ffffff; }';
+    var colorRule = colors.length
+      ? colors.map(function (c, i) { return 'var(--b' + i + ') = ' + c; }).join(', ')
+      : '(none provided — use only var(--b0)/var(--b1))';
 
     var lines = [
       'You are an expert GEO/AEO/SEO product-page copywriter and front-end developer.',
@@ -57,18 +67,22 @@
     lines.push(keywords.join('\n'));
     lines.push(
       '',
-      'BRAND VISUAL LANGUAGE (apply throughout the inline CSS):',
-      '- colors: ' + colors,
-      '- fonts: ' + fonts,
-      '- tone: ' + tone,
+      'BRAND TOKENS (MANDATORY — ignoring these = failed output):',
+      '- Use these CSS variables for EVERY color and font on the page. No other hex, rgb(), or named colors anywhere:',
+      '- ' + tokenBlock,
+      '- Token map: ' + colorRule + (fonts.length ? ' | font: var(--f0) = ' + fonts.join(', ') : ''),
+      '- Example: body { font-family: var(--f0); background: var(--b1); color: var(--b0); }',
+      '- tone of voice: ' + tone,
       '- spacing/layout: ' + spacing,
+      '- A <style> block defining exactly this :root is injected automatically — reference the vars, do not redefine them.',
       '',
-      'IMAGES (embed with <img src="..." alt="...">, meaningful alt text):'
+      'IMAGES (STRICT — broken links = failed output):'
     );
     lines.push(images.length
-      ? images.map(function (u) { return '- ' + u; }).join('\n')
-      : '- (none provided; use zero external images)');
+      ? images.map(function (u) { return '- USE ONLY this exact URL in <img src>: ' + u; }).join('\n')
+      : '- Use ZERO <img> tags. For product visuals use inline <svg> blocks (gradients/shapes) filled with the brand tokens above.');
     lines.push(
+      '- NEVER invent, guess, or hotlink image URLs (no unsplash/picsum/placeholder CDNs).',
       '',
       'OUTPUT RULES:',
       '1. Output ONE self-contained HTML document only (optionally inside a single ```html fenced block), no commentary.',
@@ -96,6 +110,43 @@
     return m[0].trim();
   }
 
+  // Deterministic brand CSS injected into every generated page, so the
+  // brand carries even if the model under-uses the tokens.
+  function buildBrandCss(brand) {
+    brand = brand || {};
+    var colors = asList(brand.colors);
+    var fonts = asList(brand.fonts);
+    var vars = colors.map(function (c, i) { return '--b' + i + ': ' + c + ';'; }).join(' ');
+    if (!colors.length) vars = '--b0: #1a1a1a; --b1: #ffffff;';
+    var bg = colors[1] || colors[0] || '#ffffff';
+    var ink = colors[0] || '#1a1a1a';
+    var accent = colors[2] || colors[0] || '#1a1a1a';
+    var stack = fonts.length ? fonts.join(', ') : 'system-ui, sans-serif';
+    return '<style>/* MEO brand tokens */\n:root { ' + vars + ' --f0: ' + stack + '; }\n' +
+      'body { font-family: var(--f0); background: ' + bg + '; color: ' + ink + '; }\n' +
+      'h1, h2, h3 { color: ' + ink + '; }\n' +
+      'a, button, .cta { background: ' + accent + '; }\n</style>';
+  }
+
+  // Replace hallucinated/hotlinked <img> (anything not in the research URL
+  // allow-list) with an inline SVG placeholder in brand colors — never a
+  // broken-image icon.
+  function sanitizeImages(html, images, brand) {
+    var allowed = asList(images).map(function (u) { return String(u).trim(); });
+    var colors = asList((brand || {}).colors);
+    var c0 = colors[0] || '#1a1a1a';
+    var c1 = colors[1] || '#e5e5e5';
+    var svg = "<svg xmlns='http://www.w3.org/2000/svg' width='800' height='600' role='img' aria-label='Product visual'>" +
+      "<defs><linearGradient id='meo' x1='0' y1='0' x2='1' y2='1'>" +
+      "<stop offset='0' stop-color='" + c0 + "'/><stop offset='1' stop-color='" + c1 + "'/>" +
+      "</linearGradient></defs><rect width='800' height='600' fill='url(#meo)'/></svg>";
+    return String(html).replace(/<img\b[^>]*>/gi, function (tag) {
+      var m = /src\s*=\s*["']([^"']+)["']/i.exec(tag);
+      if (m && allowed.indexOf(m[1].trim()) !== -1) return tag;
+      return svg;
+    });
+  }
+
   // Calls the model and returns the validated standalone HTML string.
   async function runGenerate(chatFn, research, audit, brand) {
     if (typeof chatFn !== 'function') {
@@ -117,9 +168,21 @@
     if (lower.indexOf('application/ld+json') === -1) {
       throw new Error('runGenerate: output is missing application/ld+json schema');
     }
+    var tokenUses = (html.match(/var\(--b\d+\)|var\(--f0\)/g) || []).length;
+    var hexHits = asList((brand || {}).colors).filter(function (c) {
+      return lower.indexOf(String(c).toLowerCase()) !== -1;
+    }).length;
+    if (tokenUses === 0 && hexHits === 0) {
+      throw new Error('runGenerate: output ignored the brand tokens (no var(--bN)/hex found) — click Run again');
+    }
+    html = sanitizeImages(html, asList((research || {}).images), brand);
+    var css = buildBrandCss(brand);
+    if (/<\/head\s*>/i.test(html)) html = html.replace(/<\/head\s*>/i, css + '\n</head>');
+    else if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, '$&' + css);
     return html;
   }
 
   window.MEO.buildPagePrompt = buildPagePrompt;
+  window.MEO.buildBrandCss = buildBrandCss;
   window.MEO.runGenerate = runGenerate;
 })();
