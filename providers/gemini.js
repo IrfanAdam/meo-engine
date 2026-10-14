@@ -2,7 +2,7 @@
 window.MEO = window.MEO || {};
 window.MEO.providers = window.MEO.providers || {};
 
-window.MEO.providers.gemini = async function (key, messages) {
+window.MEO.providers.gemini = async function (key, messages, model) {
   if (!key) throw new Error("MEO: missing API key for provider 'gemini'");
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error("MEO: 'messages' must be a non-empty array");
@@ -10,7 +10,7 @@ window.MEO.providers.gemini = async function (key, messages) {
   var contents = messages.map(function (m) {
     return { role: "user", parts: [{ text: String(m.content) }] };
   });
-  var MEO_GEMINI_MODEL = "gemini-3.8-flash";
+  var MEO_GEMINI_MODEL = model || "gemini-3.5-flash-lite";
   var url =
     "https://generativelanguage.googleapis.com/v1beta/models/" + MEO_GEMINI_MODEL + ":generateContent?key=" +
     encodeURIComponent(key);

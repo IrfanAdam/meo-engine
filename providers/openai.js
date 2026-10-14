@@ -2,7 +2,7 @@
 window.MEO = window.MEO || {};
 window.MEO.providers = window.MEO.providers || {};
 
-window.MEO.providers.openai = async function (key, messages) {
+window.MEO.providers.openai = async function (key, messages, model) {
   if (!key) throw new Error("MEO: missing API key for provider 'openai'");
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new Error("MEO: 'messages' must be a non-empty array");
@@ -14,7 +14,7 @@ window.MEO.providers.openai = async function (key, messages) {
       Authorization: "Bearer " + key,
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model: model || "gpt-4o-mini",
       messages: messages.map(function (m) {
         return { role: m.role === "system" ? "system" : "user", content: String(m.content) };
       }),

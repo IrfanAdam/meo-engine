@@ -11,21 +11,40 @@ function esc(s) {
   }[c]));
 }
 
-// --- provider + key storage (per provider, localStorage only) ---
+// --- provider + model + key storage (per provider, localStorage only) ---
+const MODELS = {
+  gemini: ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash"],
+  openai: ["gpt-4o-mini", "gpt-4o"],
+  anthropic: ["claude-haiku-4-5", "claude-3-5-haiku-20241022"],
+};
 function getProvider() { return $("provider").value || "gemini"; }
+function getModel() { return $("model").value || MODELS[getProvider()][0]; }
 function getKey() { return $("apiKey").value.trim(); }
+function fillModels(saved) {
+  const list = MODELS[getProvider()] || [];
+  const sel = $("model");
+  sel.innerHTML = "";
+  list.forEach((m) => {
+    const o = document.createElement("option");
+    o.value = m; o.textContent = m;
+    sel.appendChild(o);
+  });
+  sel.value = list.includes(saved) ? saved : list[0];
+}
 function savePrefs() {
   try {
     localStorage.setItem("meo.provider", getProvider());
+    localStorage.setItem("meo.model." + getProvider(), getModel());
     localStorage.setItem("meo.key." + getProvider(), getKey());
   } catch (e) { /* private mode */ }
 }
 function loadPrefs() {
   try {
     const p = localStorage.getItem("meo.provider");
-    if (p) $("provider").value = p;
+    if (p && MODELS[p]) $("provider").value = p;
+    fillModels(localStorage.getItem("meo.model." + getProvider()));
     $("apiKey").value = localStorage.getItem("meo.key." + getProvider()) || "";
-  } catch (e) { /* ignore */ }
+  } catch (e) { fillModels(); }
   refreshHint();
 }
 function refreshHint() {
@@ -36,10 +55,10 @@ function refreshHint() {
 
 // chatFn adapters (lanes disagree: research/audit take messages[], brand/generate take a string)
 function chatMessages(messages) {
-  return window.MEO.chat({ provider: getProvider(), key: getKey(), messages });
+  return window.MEO.chat({ provider: getProvider(), key: getKey(), messages, model: getModel() });
 }
 function chatPrompt(prompt) {
-  return window.MEO.chat({ provider: getProvider(), key: getKey(), messages: [{ role: "user", content: prompt }] });
+  return window.MEO.chat({ provider: getProvider(), key: getKey(), messages: [{ role: "user", content: prompt }], model: getModel() });
 }
 
 // --- mock fallback (no key): same behavior as before ---
@@ -178,10 +197,10 @@ async function runPipeline(raw) {
   // Tracks 1+3 truly in parallel, then audit (needs research), then generate.
   resetSteps();
   const provider = getProvider();
-  setStep("research", "active", `calling ${provider}…`);
-  setStep("brand", "active", `calling ${provider}…`);
-  const stopR = tickStep("research", `calling ${provider}…`);
-  const stopB = tickStep("brand", `calling ${provider}…`);
+  setStep("research", "active", `calling ${getModel()}…`);
+  setStep("brand", "active", `calling ${getModel()}…`);
+  const stopR = tickStep("research", `calling ${getModel()}…`);
+  const stopB = tickStep("brand", `calling ${getModel()}…`);
   setStatus("Research + brand tracks running in parallel…");
   const pR = window.MEO.runResearch(chatMessages, raw).then(
     (r) => { stopR(); setStep("research", "done", `${(r.usps || []).length} USPs · ${(r.keywords || []).length} keywords`); return r; },
@@ -232,9 +251,13 @@ async function runPipeline(raw) {
 }
 
 $("provider").addEventListener("change", () => {
-  try { $("apiKey").value = localStorage.getItem("meo.key." + getProvider()) || ""; } catch (e) { $("apiKey").value = ""; }
+  try {
+    fillModels(localStorage.getItem("meo.model." + getProvider()));
+    $("apiKey").value = localStorage.getItem("meo.key." + getProvider()) || "";
+  } catch (e) { fillModels(); $("apiKey").value = ""; }
   refreshHint();
 });
+$("model").addEventListener("change", () => { savePrefs(); refreshHint(); });
 $("apiKey").addEventListener("input", () => { savePrefs(); refreshHint(); });
 
 $("run").addEventListener("click", async () => {
