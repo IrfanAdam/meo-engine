@@ -242,18 +242,16 @@ async function runPipeline(raw) {
     }
   })();
   const [research, brand, pageImgs] = await Promise.all([pR, pB, pI]);
-  // Commons fallback: real photos by keyword when the page gave none.
+  // Recursive correction: search -> LLM judge -> corrected re-search until
+  // photos actually fit the product. Runs before audit/generate.
   let commonsImgs = [];
   if (!pageImgs.length) {
-    const [q1, q2] = window.MEO.commonsQueries(research, raw);
-    setStep("images", "active", `finding real photos (${q1})…`);
-    $("imgStatus").textContent = `Finding real photos (${q1})…`;
+    const phase = (t) => {
+      setStep("images", "active", t);
+      $("imgStatus").textContent = t.charAt(0).toUpperCase() + t.slice(1);
+    };
     try {
-      commonsImgs = await window.MEO.searchCommonsImages(q1, 4);
-      if (commonsImgs.length < 2 && q2 !== q1) {
-        setStep("images", "active", `too few — retrying (${q2})…`);
-        commonsImgs = await window.MEO.searchCommonsImages(q2, 4);
-      }
+      commonsImgs = await window.MEO.resolveProductImages(raw, research, chatPrompt, phase);
     } catch (e) { commonsImgs = []; }
   }
   // Merge: page photos first, then Commons photos, then research URLs — then

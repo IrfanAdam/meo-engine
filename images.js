@@ -107,7 +107,7 @@ window.MEO.searchCommonsImages = async function (query, limit) {
     if (!url) return;
     // skip multi-page documents and scans, not product photos
     if (/\/page\d+[-_]|\.(pdf|tiff?|djvu)(\?|$)/i.test(url)) return;
-    var title = String(pages[k].title || "");
+    var title = String(pages[k].title || "").replace(/^File:/i, "").replace(/\.\w+$/, "").replace(/_/g, " ");
     // drop risky/irrelevant subjects — demo safety first
     if (/(nude|naked|sex|dead|corpse|war|protest|accident|crime|funeral)/i.test(title)) return;
     cands.push({ url: url, title: title });
@@ -117,7 +117,75 @@ window.MEO.searchCommonsImages = async function (query, limit) {
   cands.sort(function (a, b) {
     return (b.title.toLowerCase().indexOf(noun) !== -1) - (a.title.toLowerCase().indexOf(noun) !== -1);
   });
-  return cands.slice(0, n).map(function (c) { return c.url; });
+  return cands.slice(0, n);
+};
+
+// URL-only wrapper (kept for compatibility).
+window.MEO.searchCommonsImages = async function (query, limit) {
+  var cands = await window.MEO.searchCommonsWithTitles(query, limit);
+  return cands.map(function (c) { return c.url; });
+};
+
+// Product name head: text before any dash/colon (brand + line + noun).
+window.MEO.productName = function (rawInput) {
+  var head = String(rawInput || "").split(/[—–\-—|:;\n]/)[0];
+  return head.replace(/https?:\/\/\S+/gi, "").trim().slice(0, 80) || "product";
+};
+
+// LLM judge: score each candidate title 0-2 for product-photo fit.
+// Returns { scores: [{i, score}], betterQuery }. Fail-open: empty on parse error.
+window.MEO.judgeImages = async function (chatFn, product, cands) {
+  var lines = cands.map(function (c, i) { return i + ". " + c.title; }).join("\n");
+  var prompt =
+    'Product: "' + product + '"\n\nCandidate stock photo titles (index + library title):\n' + lines +
+    '\n\nScore each 0-2: 2 = clear product photo OF this product, 1 = related and usable, ' +
+    '0 = wrong subject (scenery, people-focused, documents, other products). ' +
+    'Reply ONLY with JSON: {"scores":[{"i":0,"score":2}],"betterQuery":"<improved 1-2 word photo search for this product>"} ' +
+    'inside a ```json fence. No other text.';
+  var raw = await chatFn(prompt);
+  var text = (raw && typeof raw === "object" && (raw.text || raw.content)) || String(raw);
+  var start = text.indexOf("{");
+  var end = text.lastIndexOf("}");
+  if (start === -1 || end === -1) return { scores: [], betterQuery: "" };
+  try {
+    var obj = JSON.parse(text.slice(start, end + 1));
+    if (!obj || !Array.isArray(obj.scores)) return { scores: [], betterQuery: "" };
+    return { scores: obj.scores, betterQuery: String(obj.betterQuery || "") };
+  } catch (e) {
+    return { scores: [], betterQuery: "" };
+  }
+};
+
+// Recursive correction loop: search -> judge -> corrected re-search, until
+// enough fitting photos (or rounds exhausted). Returns verified-fit URLs.
+window.MEO.resolveProductImages = async function (rawInput, research, chatFn, onPhase) {
+  var MEO = window.MEO;
+  var product = MEO.productName(rawInput);
+  var queries = MEO.commonsQueries(research, rawInput);
+  var kept = [];
+  var seen = {};
+  var rounds = 3;
+  for (var r = 0; r < rounds && kept.length < 3; r++) {
+    var q = queries[0];
+    if (onPhase) onPhase("searching photos (" + q + ")… round " + (r + 1));
+    var cands = await MEO.searchCommonsWithTitles(q, 4);
+    var fresh = cands.filter(function (c) { return !seen[c.url]; });
+    if (!fresh.length) break;
+    fresh.forEach(function (c) { seen[c.url] = true; });
+    if (onPhase) onPhase("checking " + fresh.length + " photos vs product… round " + (r + 1));
+    var judged = await MEO.judgeImages(chatFn, product, fresh);
+    var byScore = {};
+    (judged.scores || []).forEach(function (s) { byScore[s.i] = s.score; });
+    // fail-open: if judge output unusable, keep noun-matching fresh candidates
+    var usable = judged.scores.length ? fresh.filter(function (_, i) { return byScore[i] >= 1; }) : fresh;
+    usable.sort(function (a, b) { return (byScore[fresh.indexOf(b)] || 0) - (byScore[fresh.indexOf(a)] || 0); });
+    usable.forEach(function (c) { if (kept.length < 4) kept.push(c.url); });
+    var next = (judged.betterQuery || "").trim();
+    if (kept.length >= 3 || !next || r === rounds - 1) break;
+    queries = [next, queries[1]];
+  }
+  if (onPhase) onPhase(kept.length ? kept.length + " fitting photos" : "no fitting photos");
+  return kept;
 };
 
 // Query pair from the raw input's product-name head (text before any
