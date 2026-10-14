@@ -238,11 +238,11 @@ async function runPipeline(raw) {
     }
   })();
   const [research, brand, pageImgs] = await Promise.all([pR, pB, pI]);
-  // Merge: page photos first, then manual URLs, then research URLs — then
-  // load-verify so only images that actually render reach the page.
+  // Merge: page photos first, then research URLs — then load-verify so only
+  // images that actually render reach the page.
   const merged = [];
   const seen = {};
-  pageImgs.concat(manualImages(), research.images || []).forEach((u) => {
+  pageImgs.concat(research.images || []).forEach((u) => {
     const url = typeof u === "string" ? u : u.src;
     if (url && !seen[url]) { seen[url] = true; merged.push(url); }
   });
@@ -288,15 +288,6 @@ async function runPipeline(raw) {
     throw e;
   }
   setStatus(`Done — live ${getProvider()} run. Open in new tab or Export the generated page.`);
-}
-
-function manualImages() {
-  const seen = {};
-  return $("manualImages").value.split("\n").map((s) => s.trim()).filter((u) => {
-    if (!/^https?:\/\//i.test(u) || seen[u]) return false;
-    seen[u] = true;
-    return true;
-  });
 }
 
 function detectUrl(text) {
