@@ -161,6 +161,22 @@
       '.faq-item, .faq > div { margin-bottom: 16px; }\n' +
       '.faq h3 { margin: 0 0 6px; font-size: 17px; }\n' +
       'footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid ' + ink + '22; color: ' + muted + '; font-size: 14px; }\n' +
+      '.site-head { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }\n' +
+      '.site-head .mark { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 10px; background: ' + accent + '; color: #fff; font-weight: 800; font-size: 18px; }\n' +
+      '.site-head .brandline { font-weight: 700; font-size: 15px; }\n' +
+      '.site-head .geo-chip { margin-left: auto; font-size: 12.5px; font-weight: 600; color: ' + muted + '; border: 1px solid ' + ink + '26; border-radius: 999px; padding: 5px 14px; }\n' +
+      '.hero .sub { font-size: 17px; color: ' + ink + 'cc; margin: 0 0 20px; max-width: 46ch; }\n' +
+      '.hero .stars { color: ' + accent + '; letter-spacing: 2px; font-size: 18px; }\n' +
+      '.hero .rating { font-weight: 600; font-size: 15px; margin: 0 0 12px; }\n' +
+      '.checks { list-style: none; margin: 0 0 8px; padding: 0; }\n' +
+      '.checks li { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 10px; font-weight: 500; }\n' +
+      '.checks svg { width: 18px; height: 18px; flex: none; margin-top: 3px; color: ' + accent + '; }\n' +
+      '.price-row { display: flex; align-items: center; gap: 20px; margin: 20px 0 0; }\n' +
+      '.proof > div { font-size: 15px; }\n' +
+      '.specs th { width: 34%; color: ' + ink + 'aa; font-weight: 600; }\n' +
+      '.faq-item { background: #ffffff; border: 1px solid ' + ink + '18; border-radius: 12px; padding: 14px 18px; }\n' +
+      '.faq-item summary { font-weight: 700; cursor: pointer; font-size: 16px; }\n' +
+      '.faq-item p { margin: 8px 0 4px; color: ' + ink + 'cc; }\n' +
       '@media (max-width: 800px) { .hero { grid-template-columns: 1fr; } .proof { grid-template-columns: 1fr; } }\n</style>';
   }
 
@@ -307,9 +323,109 @@
     return html;
   }
 
+  // ---- Structured content path (preferred): the model returns ONLY JSON
+  // content; MEO.buildPage renders it deterministically. Small, validatable,
+  // and immune to layout/CSS drift.
+  function buildContentPrompt(research, audit, brand) {
+    research = research || {};
+    audit = audit || {};
+    brand = brand || {};
+    var name = research.name || research.product || 'the product';
+    var usps = asList(research.usps);
+    var facts = asList(research.facts);
+    var keywords = fmtKeywords(audit);
+    var tone = asList(brand.tone).join(', ') || 'clear, confident, friendly';
+    return [
+      'You are an expert GEO/AEO/SEO product copywriter. Write page content for: ' + name,
+      '',
+      'UNIQUE SELLING POINTS:',
+      usps.length ? usps.map(function (u) { return '- ' + u; }).join('\n') : '- (infer plausible ones)',
+      '',
+      'SUPPORTING FACTS:',
+      facts.length ? facts.map(function (f) { return '- ' + f; }).join('\n') : '- (none)',
+      '',
+      'KEYWORDS (work each term naturally into headline/subhead/bullets/faqs):',
+      keywords.join('\n'),
+      '',
+      'VOICE: ' + tone,
+      '',
+      'Reply ONLY with JSON inside a ```json fence, no other text. Exact shape:',
+      '{"headline":"product name + top keyword, <= 70 chars",',
+      ' "subhead":"1-2 sentence benefit summary, key specs in first 100 chars",',
+      ' "rating":4.8, "reviews":"2,314", "price":"$89", "cta":"Buy now",',
+      ' "bullets":["4-6 punchy benefit bullets"],',
+      ' "specs":[{"k":"Capacity","v":"25L"}, ... 4-8 rows],',
+      ' "faqs":[{"q":"...","a":"..."}, ... 3-5 pairs, answers 1-3 sentences],',
+      ' "trust":["Free shipping","30-day returns","2-year warranty"]}',
+      'Numbers must be plausible for this product; never invent certifications.'
+    ].join('\n');
+  }
+
+  function parseContent(raw) {
+    if (raw && typeof raw === 'object') {
+      if (typeof raw.text === 'string') raw = raw.text;
+      else if (typeof raw.content === 'string') raw = raw.content;
+    }
+    var text = String(raw || '');
+    var start = text.indexOf('{');
+    var end = text.lastIndexOf('}');
+    if (start === -1 || end === -1) throw new Error('runContent: no JSON object found');
+    var obj;
+    try {
+      obj = JSON.parse(text.slice(start, end + 1));
+    } catch (e) {
+      throw new Error('runContent: invalid JSON — ' + e.message);
+    }
+    var missing = [];
+    if (!obj.headline) missing.push('headline');
+    if (!Array.isArray(obj.bullets) || obj.bullets.length < 3) missing.push('bullets>=3');
+    if (!Array.isArray(obj.specs) || obj.specs.length < 3) missing.push('specs>=3');
+    if (!Array.isArray(obj.faqs) || obj.faqs.length < 3) missing.push('faqs>=3');
+    if (missing.length) throw new Error('runContent: incomplete content, missing: ' + missing.join(', '));
+    obj.specs = obj.specs.filter(function (s) { return s && s.k && s.v; });
+    obj.faqs = obj.faqs.filter(function (f) { return f && f.q && f.a; });
+    return obj;
+  }
+
+  function contentQuality(c) {
+    return (c.bullets || []).length * 2 + (c.specs || []).length * 2 +
+      (c.faqs || []).length * 3 + (c.headline ? 5 : 0) +
+      (c.subhead ? 5 : 0) + (c.price ? 2 : 0) + (c.rating ? 2 : 0);
+  }
+
+  // Draft -> validate -> targeted revise (max `passes` revises). Keeps best.
+  async function runContentRefined(chatFn, research, audit, brand, passes, onPass) {
+    passes = passes == null ? 1 : passes;
+    if (typeof chatFn !== 'function') throw new Error('runContent: chatFn must be a function');
+    var spec = buildContentPrompt(research, audit, brand);
+    var total = passes + 1;
+    var best = null, bestQ = -1;
+    var feedback = '';
+    for (var i = 0; i < total; i++) {
+      if (onPass) onPass(i + 1, total);
+      var prompt = feedback ? spec + '\n\nPREVIOUS ATTEMPT FAILED VALIDATION. Fix exactly this and nothing else:\n' + feedback : spec;
+      var cand;
+      try {
+        cand = parseContent(await chatFn(prompt));
+      } catch (e) {
+        feedback = String(e.message);
+        continue;
+      }
+      var q = contentQuality(cand);
+      if (q > bestQ) { best = cand; bestQ = q; }
+      feedback = '';
+      if ((cand.bullets || []).length >= 4 && (cand.specs || []).length >= 4 && (cand.faqs || []).length >= 3) break;
+    }
+    if (!best) throw new Error('runContent: model never returned valid content (' + feedback + ') — click Run again');
+    return best;
+  }
+
   window.MEO.buildPagePrompt = buildPagePrompt;
   window.MEO.buildBrandCss = buildBrandCss;
   window.MEO.ensureHeroVisual = ensureHeroVisual;
   window.MEO.runGenerate = runGenerate;
   window.MEO.runGenerateRefined = runGenerateRefined;
+  window.MEO.buildContentPrompt = buildContentPrompt;
+  window.MEO.parseContent = parseContent;
+  window.MEO.runContentRefined = runContentRefined;
 })();

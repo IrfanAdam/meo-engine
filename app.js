@@ -225,10 +225,11 @@ async function runPipeline(raw) {
     (b) => { stopB(); setStep("brand", "done", (b.colors || []).slice(0, 3).join(" ") || "tokens parsed"); return b; },
     (e) => { stopB(); setStep("brand", "error", friendlyError(e)); throw e; }
   );
-  // Auto image track: page photos when input has a URL, else real photo search.
+  // Block A (parallel): research + brand + page-photo fetch + photo hunt.
+  // The hunt uses the raw input for queries, so it needs no research output.
   const pageUrl = detectUrl(raw);
-  setStep("images", "active", pageUrl ? "fetching page photos…" : "waiting on research…");
-  $("imgStatus").textContent = pageUrl ? "Auto-fetching page images…" : "Research will supply product image URLs…";
+  setStep("images", "active", pageUrl ? "fetching page photos…" : "hunting photos…");
+  $("imgStatus").textContent = pageUrl ? "Auto-fetching page images…" : "Photo hunt running…";
   const pI = (async () => {
     if (!pageUrl) return [];
     try {
@@ -236,29 +237,26 @@ async function runPipeline(raw) {
       setStep("images", "active", `found ${found.length} page photos…`);
       return found;
     } catch (e) {
-      setStep("images", "active", "page blocked — using photo search…");
-      $("imgStatus").textContent = "Page images blocked — falling back to research image URLs.";
+      setStep("images", "active", "page blocked — hunting stock…");
       return [];
     }
   })();
-  const [research, brand, pageImgs] = await Promise.all([pR, pB, pI]);
-  // Hunter subagent: exhaustive multi-source photo hunt with relevance
-  // judging. Runs before audit/generate; wrong-subject photos never pass.
-  let commonsImgs = [];
-  if (!pageImgs.length) {
+  const pH = (async () => {
+    if (pageUrl) return [];
     const phase = (t) => {
       setStep("images", "active", t);
       $("imgStatus").textContent = t.charAt(0).toUpperCase() + t.slice(1);
     };
     try {
-      commonsImgs = await window.MEO.huntImages(raw, research, chatPrompt, phase);
-    } catch (e) { commonsImgs = []; }
-  }
-  // Merge: page photos first, then Commons photos, then research URLs — then
+      return await window.MEO.huntImages(raw, {}, chatPrompt, phase);
+    } catch (e) { return []; }
+  })();
+  const [research, brand, pageImgs, huntImgs] = await Promise.all([pR, pB, pI, pH]);
+  // Merge: page photos first, then hunted exact-fit, then research URLs — then
   // load-verify so only images that actually render reach the page.
   const merged = [];
   const seen = {};
-  pageImgs.concat(commonsImgs, research.images || []).forEach((u) => {
+  pageImgs.concat(huntImgs, research.images || []).forEach((u) => {
     const url = typeof u === "string" ? u : u.src;
     if (url && !seen[url]) { seen[url] = true; merged.push(url); }
   });
@@ -268,17 +266,25 @@ async function runPipeline(raw) {
   setStep("images", "done", research.images.length
     ? `${research.images.length} verified image${research.images.length > 1 ? "s" : ""}`
     : "no photos — brand visuals");
+  // Block B (parallel): audit scores + page content. Content draws keywords
+  // from research, so it needs no audit output — both run together.
   setStep("audit", "active", `scoring vs GEO/AEO checks… pass 1/${TOTAL}`);
+  setStep("generate", "active", "writing page content…");
   const stopA = tickStep("audit", "scoring vs GEO/AEO checks…");
-  setStatus("Audit track running (draft → critique → revise)…");
-  let auditRaw;
+  const stopG = tickStep("generate", "writing page content…");
+  setStatus("Audit + content running in parallel…");
+  const pA = window.MEO.runAuditRefined(chatMessages, raw, JSON.stringify(research).slice(0, 2000), PASSES, passNote("audit")).then(
+    (a) => { stopA(); setStep("audit", "done", `score ${a.score} · ${a.checks.length} checks · ${a.keywords.length} keywords`); return a; },
+    (e) => { stopA(); setStep("audit", "error", friendlyError(e)); throw e; }
+  );
+  const pC = window.MEO.runContentRefined(chatPrompt, research, { keywords: research.keywords || [] }, brand, PASSES, passNote("generate")).then(
+    (c) => { stopG(); setStep("generate", "done", `${(c.bullets || []).length} bullets · ${(c.faqs || []).length} FAQs`); return c; },
+    (e) => { stopG(); setStep("generate", "error", friendlyError(e)); throw e; }
+  );
+  let auditRaw, content;
   try {
-    auditRaw = await window.MEO.runAuditRefined(chatMessages, raw, JSON.stringify(research).slice(0, 2000), PASSES, passNote("audit"));
-    stopA();
-    setStep("audit", "done", `score ${auditRaw.score} · ${auditRaw.checks.length} checks · ${auditRaw.keywords.length} keywords`);
+    [auditRaw, content] = await Promise.all([pA, pC]);
   } catch (e) {
-    stopA();
-    setStep("audit", "error", friendlyError(e));
     throw e;
   }
   const audit = {
@@ -292,18 +298,10 @@ async function runPipeline(raw) {
   renderAudit(audit);
   renderLive(research, auditRaw, brand);
   lastAudit = audit;
-  setStep("generate", "active", "writing standalone HTML…");
-  const stopG = tickStep("generate", "writing standalone HTML…");
-  setStatus("Generating optimized page (draft → critique → revise)…");
-  try {
-    lastGeneratedHtml = await window.MEO.runGenerateRefined(chatPrompt, research, auditRaw, brand, PASSES, passNote("generate"));
-    stopG();
-    setStep("generate", "done", `${(lastGeneratedHtml.length / 1024).toFixed(1)} KB page ready`);
-  } catch (e) {
-    stopG();
-    setStep("generate", "error", friendlyError(e));
-    throw e;
-  }
+  // Deterministic build: engine renders validated content into the fixed
+  // template. No model HTML involved — layout is identical every run.
+  lastGeneratedHtml = window.MEO.buildPage(content, research, auditRaw, brand);
+  setStep("generate", "done", `${(lastGeneratedHtml.length / 1024).toFixed(1)} KB page ready`);
   setStatus(`Done — live ${getProvider()} run. Open in new tab or Export the generated page.`);
 }
 

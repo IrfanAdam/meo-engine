@@ -16,9 +16,11 @@ Embed valid JSON-LD (LocalBusiness/Organization + FAQPage).
 Research JSON: {facts, usps, competitors, keywords, images}.
 
 ## Output contract
-- Single HTML document: <!DOCTYPE html> ... </html>.
-- Inline <style> only; no <link> stylesheets, no external scripts.
-- One <h1>, title + meta description using primary keyword.
+- The model returns ONLY content JSON (headline, subhead, rating, reviews,
+  price, cta, bullets, specs, faqs, trust) — validated by parseContent.
+- NEVER model-written HTML/CSS. MEO.buildPage (template skill) renders the
+  fixed layout deterministically, so every run looks identical in structure.
+- Exactly one <h1>, title + meta description from headline/subhead.
 - JSON-LD <script type="application/ld+json"> valid JSON.
 - No lorem ipsum; every claim traceable to research facts.
 - Layout skeleton: .wrap > header.hero (.hero-copy + .hero-media, 56/44 grid) + .proof + .specs + .faq + footer.

@@ -200,7 +200,7 @@ window.MEO.huntImages = async function (rawInput, research, chatFn, onPhase) {
   var twos = [];
   var ones = [];
   var seen = {};
-  var rounds = 5;
+  var rounds = 4;
   for (var r = 0; r < rounds && twos.length < 3; r++) {
     var q = null;
     while (queue.length) {
