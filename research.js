@@ -10,7 +10,7 @@ window.MEO.buildResearchPrompt = function buildResearchPrompt(input) {
     "2. USPs — list at least 3 unique selling points\n" +
     "3. positioning vs competitors (name 2-4 competitors and how this product differs)\n" +
     "4. target keywords (SEO/AEO phrases users would search)\n" +
-    "5. image / og:image hints (what hero, gallery, and social images the page needs)\n\n" +
+    "5. image URLs (real, publicly loadable image URLs for THIS exact product — brand/retailer CDN or og:image style URLs you know exist; never invent or guess URLs; use [] if unknown)\n\n" +
     'Reply ONLY with JSON shaped as {"facts":[],"usps":[],"competitors":[],"keywords":[],"images":[]} ' +
     "inside a ```json code fence. No other text."
   );

@@ -225,10 +225,32 @@ async function runPipeline(raw) {
     (b) => { stopB(); setStep("brand", "done", (b.colors || []).slice(0, 3).join(" ") || "tokens parsed"); return b; },
     (e) => { stopB(); setStep("brand", "error", friendlyError(e)); throw e; }
   );
-  const [research, brand] = await Promise.all([pR, pB]);
-  // User-picked/manual images win over model-guessed ones (real photos beat SVG).
-  const userImgs = selectedImages();
-  if (userImgs.length) research.images = userImgs;
+  // Auto image track: page photos when input has a URL, else research supplies URLs.
+  const pageUrl = detectUrl(raw);
+  $("imgStatus").textContent = pageUrl ? "Auto-fetching page images…" : "Research will supply product image URLs…";
+  const pI = (async () => {
+    if (!pageUrl) return [];
+    try {
+      return (await window.MEO.fetchPageImages(pageUrl)).map((im) => im.src);
+    } catch (e) {
+      $("imgStatus").textContent = "Page images blocked — falling back to research image URLs.";
+      return [];
+    }
+  })();
+  const [research, brand, pageImgs] = await Promise.all([pR, pB, pI]);
+  // Merge: page photos first, then manual URLs, then research URLs — then
+  // load-verify so only images that actually render reach the page.
+  const merged = [];
+  const seen = {};
+  pageImgs.concat(manualImages(), research.images || []).forEach((u) => {
+    const url = typeof u === "string" ? u : u.src;
+    if (url && !seen[url]) { seen[url] = true; merged.push(url); }
+  });
+  $("imgStatus").textContent = `Verifying ${merged.length} image URLs…`;
+  research.images = await window.MEO.verifyImages(merged);
+  $("imgStatus").textContent = research.images.length
+    ? `${research.images.length} verified image${research.images.length > 1 ? "s" : ""} will be used.`
+    : "No loadable images found — page will use brand visuals.";
   setStep("audit", "active", `scoring vs GEO/AEO checks… pass 1/${TOTAL}`);
   const stopA = tickStep("audit", "scoring vs GEO/AEO checks…");
   setStatus("Audit track running (draft → critique → revise)…");
@@ -268,56 +290,18 @@ async function runPipeline(raw) {
   setStatus(`Done — live ${getProvider()} run. Open in new tab or Export the generated page.`);
 }
 
-function selectedImages() {
-  const checked = Array.from(document.querySelectorAll("#imgPicker input:checked"))
-    .map((c) => c.value).filter(Boolean);
-  const manual = $("manualImages").value.split("\n").map((s) => s.trim()).filter(Boolean);
+function manualImages() {
   const seen = {};
-  return checked.concat(manual).filter((u) => {
-    if (seen[u]) return false;
+  return $("manualImages").value.split("\n").map((s) => s.trim()).filter((u) => {
+    if (!/^https?:\/\//i.test(u) || seen[u]) return false;
     seen[u] = true;
-    return /^https?:\/\//i.test(u);
+    return true;
   });
 }
 
-function renderPicker(found) {
-  const box = $("imgPicker");
-  box.innerHTML = "";
-  found.forEach((im, i) => {
-    const lab = document.createElement("label");
-    if (i < 3) lab.classList.add("picked");
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.value = im.src;
-    cb.checked = i < 3; // first 3 pre-selected (og:image usually first)
-    cb.addEventListener("change", () => lab.classList.toggle("picked", cb.checked));
-    const img = document.createElement("img");
-    img.src = im.src;
-    img.alt = im.alt || "product image";
-    img.loading = "lazy";
-    lab.appendChild(cb);
-    lab.appendChild(img);
-    lab.title = im.src;
-    box.appendChild(lab);
-  });
+function detectUrl(text) {
+  return (String(text).match(/https?:\/\/[^\s]+/i) || [])[0] || "";
 }
-
-$("fetchImages").addEventListener("click", async () => {
-  const raw = $("input").value.trim();
-  const url = (raw.match(/https?:\/\/[^\s]+/i) || [])[0] || "";
-  if (!url) {
-    $("imgStatus").textContent = "Paste a product URL in the box above first — or paste image URLs manually below.";
-    return;
-  }
-  $("imgStatus").textContent = "Fetching images…";
-  try {
-    const found = await window.MEO.fetchPageImages(url);
-    renderPicker(found);
-    $("imgStatus").textContent = `Found ${found.length} images — first 3 pre-selected, click to change.`;
-  } catch (e) {
-    $("imgStatus").textContent = e && e.message ? e.message : String(e);
-  }
-});
 $("provider").addEventListener("change", () => {
   try {
     fillModels(localStorage.getItem("meo.model." + getProvider()));

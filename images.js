@@ -52,7 +52,7 @@ window.MEO.extractImageUrls = function (htmlText, baseUrl) {
 window.MEO.fetchPageImages = async function (pageUrl) {
   var target = String(pageUrl || "").trim();
   if (!/^https?:\/\//i.test(target)) {
-    throw new Error("Image fetch needs a full http(s) product URL — or paste image URLs manually below.");
+    throw new Error("Image fetch needs a full http(s) product URL.");
   }
   var proxy = "https://api.allorigins.win/raw?url=" + encodeURIComponent(target);
   var ctrl = new AbortController();
@@ -71,7 +71,28 @@ window.MEO.fetchPageImages = async function (pageUrl) {
   var html = await res.text();
   var found = window.MEO.extractImageUrls(html, target);
   if (!found.length) {
-    throw new Error("No usable images found on that page. Paste image URLs manually below.");
+    throw new Error("No usable images found on that page.");
   }
   return found;
+};
+
+// Keep only URLs that actually load in the browser (kills hallucinated URLs).
+// Returns a Promise of the loadable subset, capped at 6, order preserved.
+window.MEO.verifyImages = function (urls, timeoutMs) {
+  var list = (urls || []).filter(function (u) { return /^https?:\/\//i.test(u); });
+  if (typeof Image === "undefined") return Promise.resolve(list.slice(0, 6));
+  var wait = timeoutMs || 8000;
+  function loads(src) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var timer = setTimeout(function () { if (!done) { done = true; resolve(false); } }, wait);
+      var img = new Image();
+      img.onload = function () { if (!done) { done = true; clearTimeout(timer); resolve(true); } };
+      img.onerror = function () { if (!done) { done = true; clearTimeout(timer); resolve(false); } };
+      img.src = src;
+    });
+  }
+  return Promise.all(list.map(loads)).then(function (ok) {
+    return list.filter(function (_, i) { return ok[i]; }).slice(0, 6);
+  });
 };
