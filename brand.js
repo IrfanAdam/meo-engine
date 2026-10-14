@@ -87,4 +87,31 @@
 
   window.MEO.buildBrandPrompt = buildBrandPrompt;
   window.MEO.extractBrand = extractBrand;
+
+  // Multi-pass: draft -> critique -> revise. Keeps the best valid tokens.
+  window.MEO.extractBrandRefined = async function (chatFn, input, passes, onPass) {
+    passes = passes == null ? 1 : passes;
+    if (typeof chatFn !== 'function') throw new Error('extractBrand: chatFn must be a function');
+    var prompt = buildBrandPrompt(input);
+    async function call(p) {
+      var raw = await chatFn(p);
+      if (raw && typeof raw === 'object') {
+        if (typeof raw.text === 'string') raw = raw.text;
+        else if (typeof raw.content === 'string') raw = raw.content;
+      }
+      return validateBrand(extractJson(raw));
+    }
+    var best = await call(prompt);
+    if (onPass) onPass(1, passes + 1);
+    for (var i = 0; i < passes; i++) {
+      var critique = await chatFn(
+        window.MEO.buildCritiquePrompt('brand', JSON.stringify(best).slice(0, 2000)));
+      if (/^\s*PASS\s*$/i.test(String(critique))) { if (onPass) onPass(i + 2, passes + 1); break; }
+      try {
+        best = await call(window.MEO.buildRevisePrompt('brand', prompt, JSON.stringify(best), critique));
+      } catch (e) { /* keep previous best */ }
+      if (onPass) onPass(i + 2, passes + 1);
+    }
+    return best;
+  };
 })();

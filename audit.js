@@ -58,33 +58,72 @@
     return null;
   }
 
+  function parseAudit(text) {
+    var str = String(text == null ? "" : text);
+    var block = extractFirstJsonBlock(str);
+    if (!block) {
+      throw new Error("Audit parse failed: no JSON object found. Snippet: " + str.slice(0, 200));
+    }
+    var obj;
+    try {
+      obj = JSON.parse(block);
+    } catch (e) {
+      throw new Error("Audit parse failed: invalid JSON (" + e.message + "). Snippet: " + block.slice(0, 200));
+    }
+    var err = validateAudit(obj);
+    if (err) {
+      throw new Error("Audit validation failed: " + err + ". Snippet: " + block.slice(0, 200));
+    }
+    return obj;
+  }
+
+  function auditQuality(obj) {
+    // higher = better; gates the refine loop against regressions
+    var ids = {};
+    obj.checks.forEach(function (c) { ids[c.id] = true; });
+    var coverage = CHECK_IDS.filter(function (id) { return ids[id]; }).length;
+    return coverage * 100 + obj.keywords.length * 10 + obj.score;
+  }
+
   function runAudit(chatFn, input, research) {
     var messages = [{ role: "user", content: buildAuditPrompt(input, research) }];
     return Promise.resolve()
       .then(function () { return chatFn(messages); })
-      .then(function (raw) {
-        var text = String(raw == null ? "" : raw);
-        var block = extractFirstJsonBlock(text);
-        if (!block) {
-          throw new Error("Audit parse failed: no JSON object found. Snippet: " + text.slice(0, 200));
-        }
-        var obj;
-        try {
-          obj = JSON.parse(block);
-        } catch (e) {
-          throw new Error("Audit parse failed: invalid JSON (" + e.message + "). Snippet: " + block.slice(0, 200));
-        }
-        var err = validateAudit(obj);
-        if (err) {
-          throw new Error("Audit validation failed: " + err + ". Snippet: " + block.slice(0, 200));
-        }
-        return obj;
-      });
+      .then(function (raw) { return parseAudit(raw); });
+  }
+
+  // Multi-pass: draft -> critique -> revise. Keeps the best valid audit.
+  async function runAuditRefined(chatFn, input, research, passes, onPass) {
+    passes = passes == null ? 1 : passes;
+    var prompt = buildAuditPrompt(input, research);
+    var draftText = await chatFn([{ role: "user", content: prompt }]);
+    var best = parseAudit(draftText);
+    var bestQ = auditQuality(best);
+    if (onPass) onPass(1, passes + 1);
+    for (var i = 0; i < passes; i++) {
+      var critique = await chatFn([{
+        role: "user",
+        content: window.MEO.buildCritiquePrompt("audit", JSON.stringify(best).slice(0, 4000)),
+      }]);
+      if (/^\s*PASS\s*$/i.test(String(critique))) { if (onPass) onPass(i + 2, passes + 1); break; }
+      var revised = await chatFn([{
+        role: "user",
+        content: window.MEO.buildRevisePrompt("audit", prompt, JSON.stringify(best), critique),
+      }]);
+      try {
+        var cand = parseAudit(revised);
+        if (auditQuality(cand) >= bestQ) { best = cand; bestQ = auditQuality(cand); }
+      } catch (e) { /* keep previous best */ }
+      if (onPass) onPass(i + 2, passes + 1);
+    }
+    return best;
   }
 
   window.MEO = window.MEO || {};
   window.MEO.buildAuditPrompt = buildAuditPrompt;
   window.MEO.runAudit = runAudit;
+  window.MEO.parseAudit = parseAudit;
+  window.MEO.runAuditRefined = runAuditRefined;
   window.MEO.AUDIT_CHECK_IDS = CHECK_IDS;
   window.MEO.AUDIT_CHECK_LABELS = CHECK_LABELS;
   window.MEO.AUDIT_PLACES = PLACES;

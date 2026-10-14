@@ -30,3 +30,4 @@ Score = 0-100 weighted by failed checks (-15 critical, -5 minor).
 - Output valid JSON only, no markdown fences.
 - Ship threshold: score >= 80 and zero failed critical checks.
 - Each check needs a one-line actionable detail on failure.
+- Multi-pass: draft -> critique -> revise; keep highest coverage + keyword count.

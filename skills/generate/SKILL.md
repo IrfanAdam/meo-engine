@@ -21,6 +21,10 @@ Research JSON: {facts, usps, competitors, keywords, images}.
 - One <h1>, title + meta description using primary keyword.
 - JSON-LD <script type="application/ld+json"> valid JSON.
 - No lorem ipsum; every claim traceable to research facts.
+- Layout skeleton: .wrap > header.hero (.hero-copy + .hero-media, 56/44 grid) + .proof + .specs + .faq + footer.
+- Brand: style ONLY via var(--bN)/var(--f0) tokens; engine injects :root + base CSS.
+- Images: allow-listed URLs only, else inline <svg>; never hotlink/invent URLs.
+- Multi-pass: draft -> critique (checklist above) -> revise; keep best valid page.
 
 ## Rules
 - Return HTML only, no fences, no commentary.

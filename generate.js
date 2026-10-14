@@ -84,6 +84,20 @@
     lines.push(
       '- NEVER invent, guess, or hotlink image URLs (no unsplash/picsum/placeholder CDNs).',
       '',
+      'LAYOUT (exact skeleton — every generated page follows this structure):',
+      '<div class="wrap">',
+      '  <header class="hero">',
+      '    <div class="hero-copy"> h1, star-rating line, price line, key specs (first 100 words), buy button </div>',
+      '    <div class="hero-media"> ONE visual: allow-listed <img> or inline <svg> only </div>',
+      '  </header>',
+      '  <section class="proof"> 3 trust bullets (shipping / returns / warranty) </section>',
+      '  <section class="specs"> <h2>Specifications</h2> + <table> of spec rows </section>',
+      '  <section class="faq"> <h2>FAQ</h2> + 3 or more question/answer pairs (mirror the FAQ JSON-LD) </section>',
+      '  <footer> brand line </footer>',
+      '</div>',
+      'Base CSS for .wrap/.hero/.proof/.specs/.faq is injected automatically — use exactly these class names.',
+      '',
+      '',
       'OUTPUT RULES:',
       '1. Output ONE self-contained HTML document only (optionally inside a single ```html fenced block), no commentary.',
       '2. Inline <style> in <head>; no external stylesheets or scripts except JSON-LD.',
@@ -110,8 +124,8 @@
     return m[0].trim();
   }
 
-  // Deterministic brand CSS injected into every generated page, so the
-  // brand carries even if the model under-uses the tokens.
+  // Deterministic brand + layout CSS injected into every generated page, so
+  // the brand and structure carry even if the model under-uses the tokens.
   function buildBrandCss(brand) {
     brand = brand || {};
     var colors = asList(brand.colors);
@@ -122,10 +136,46 @@
     var ink = colors[0] || '#1a1a1a';
     var accent = colors[2] || colors[0] || '#1a1a1a';
     var stack = fonts.length ? fonts.join(', ') : 'system-ui, sans-serif';
-    return '<style>/* MEO brand tokens */\n:root { ' + vars + ' --f0: ' + stack + '; }\n' +
-      'body { font-family: var(--f0); background: ' + bg + '; color: ' + ink + '; }\n' +
+    return '<style>/* MEO brand tokens + layout */\n:root { ' + vars + ' --f0: ' + stack + '; }\n' +
+      'body { font-family: var(--f0); background: ' + bg + '; color: ' + ink + '; margin: 0; }\n' +
       'h1, h2, h3 { color: ' + ink + '; }\n' +
-      'a, button, .cta { background: ' + accent + '; }\n</style>';
+      'a, button, .cta { background: ' + accent + '; }\n' +
+      '.wrap { max-width: 1100px; margin: 0 auto; padding: 32px 20px 64px; }\n' +
+      '.hero { display: grid; grid-template-columns: 56fr 44fr; gap: 32px; align-items: center; margin-bottom: 40px; }\n' +
+      '.hero-media svg, .hero-media img { width: 100%; height: auto; border-radius: 12px; display: block; }\n' +
+      '.proof { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 40px; }\n' +
+      '.specs table { width: 100%; border-collapse: collapse; margin-bottom: 40px; }\n' +
+      '.specs th, .specs td { text-align: left; padding: 10px 12px; border-bottom: 1px solid ' + ink + '22; }\n' +
+      '.faq h3 { margin-bottom: 4px; }\n' +
+      '@media (max-width: 800px) { .hero { grid-template-columns: 1fr; } .proof { grid-template-columns: 1fr; } }\n</style>';
+  }
+
+  // Guarantee a visible hero visual: if the page has no <svg> and no
+  // allow-listed <img>, insert a brand-gradient hero SVG into .hero-media
+  // (fallback: right after the </h1>).
+  function ensureHeroVisual(html, images, brand) {
+    var allowed = asList(images).map(function (u) { return String(u).trim(); });
+    var hasSvg = /<svg[\s>]/i.test(html);
+    var hasImg = false;
+    String(html).replace(/<img\b[^>]*>/gi, function (tag) {
+      var m = /src\s*=\s*["']([^"']+)["']/i.exec(tag);
+      if (m && allowed.indexOf(m[1].trim()) !== -1) hasImg = true;
+      return tag;
+    });
+    if (hasSvg || hasImg) return html;
+    var colors = asList((brand || {}).colors);
+    var c0 = colors[0] || '#1a1a1a';
+    var c1 = colors[1] || '#e5e5e5';
+    var svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 600' role='img' aria-label='Product visual'>" +
+      "<defs><linearGradient id='meohero' x1='0' y1='0' x2='1' y2='1'>" +
+      "<stop offset='0' stop-color='" + c0 + "'/><stop offset='1' stop-color='" + c1 + "'/>" +
+      "</linearGradient></defs><rect width='800' height='600' fill='url(#meohero)'/>" +
+      "<circle cx='600' cy='180' r='120' fill='#ffffff' opacity='0.25'/>" +
+      "<circle cx='180' cy='450' r='80' fill='#ffffff' opacity='0.18'/></svg>";
+    if (/<div[^>]*class=["'][^"']*hero-media[^"']*["'][^>]*>/i.test(html)) {
+      return html.replace(/(<div[^>]*class=["'][^"']*hero-media[^"']*["'][^>]*>)/i, '$1' + svg);
+    }
+    return html.replace(/(<\/h1\s*>)/i, '$1' + svg);
   }
 
   // Replace hallucinated/hotlinked <img> (anything not in the research URL
@@ -175,7 +225,68 @@
     if (tokenUses === 0 && hexHits === 0) {
       throw new Error('runGenerate: output ignored the brand tokens (no var(--bN)/hex found) — click Run again');
     }
+    if (!/class=["'][^"']*\bhero\b/i.test(html)) {
+      throw new Error('runGenerate: output ignored the layout skeleton (no .hero section) — click Run again');
+    }
     html = sanitizeImages(html, asList((research || {}).images), brand);
+    html = ensureHeroVisual(html, asList((research || {}).images), brand);
+    var css = buildBrandCss(brand);
+    if (/<\/head\s*>/i.test(html)) html = html.replace(/<\/head\s*>/i, css + '\n</head>');
+    else if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, '$&' + css);
+    return html;
+  }
+
+  function pageQuality(html) {
+    // higher = better; gates the refine loop against regressions
+    var score = 0;
+    var classes = ['wrap', 'hero', 'hero-copy', 'hero-media', 'proof', 'specs', 'faq'];
+    classes.forEach(function (c) {
+      if (new RegExp('class=["\'][^"\']*\\b' + c + '\\b', 'i').test(html)) score += 10;
+    });
+    score += (html.match(/var\(--b\d+\)|var\(--f0\)/g) || []).length;
+    score += (html.match(/<svg[\s>]/gi) || []).length * 5;
+    return score;
+  }
+
+  // Multi-pass: draft -> critique -> revise. Keeps the best valid page.
+  async function runGenerateRefined(chatFn, research, audit, brand, passes, onPass) {
+    passes = passes == null ? 1 : passes;
+    if (typeof chatFn !== 'function') throw new Error('runGenerate: chatFn must be a function');
+    var spec = buildPagePrompt(research, audit, brand);
+    var draftRaw = await chatFn(spec);
+    var draftHtml = postProcess(draftRaw, research, brand);
+    var best = draftHtml, bestQ = pageQuality(draftHtml);
+    if (onPass) onPass(1, passes + 1);
+    for (var i = 0; i < passes; i++) {
+      var critique = await chatFn(window.MEO.buildCritiquePrompt('generate', best.slice(0, 6000)));
+      if (/^\s*PASS\s*$/i.test(String(critique))) { if (onPass) onPass(i + 2, passes + 1); break; }
+      var revised = await chatFn(window.MEO.buildRevisePrompt('generate', spec, best.slice(0, 8000), critique));
+      try {
+        var cand = postProcess(revised, research, brand);
+        if (pageQuality(cand) >= bestQ) { best = cand; bestQ = pageQuality(cand); }
+      } catch (e) { /* keep previous best */ }
+      if (onPass) onPass(i + 2, passes + 1);
+    }
+    return best;
+  }
+
+  // Shared validate + sanitize + inject pipeline used by both runners.
+  function postProcess(raw, research, brand) {
+    if (raw && typeof raw === 'object') {
+      if (typeof raw.text === 'string') raw = raw.text;
+      else if (typeof raw.content === 'string') raw = raw.content;
+    }
+    if (typeof raw !== 'string' || raw.trim().length === 0) {
+      throw new Error('runGenerate: chatFn returned empty output');
+    }
+    var html = extractHtml(raw);
+    var lower = html.toLowerCase();
+    if (lower.indexOf('<html') === -1) throw new Error('runGenerate: output is missing <html>');
+    if (lower.indexOf('application/ld+json') === -1) {
+      throw new Error('runGenerate: output is missing application/ld+json schema');
+    }
+    html = sanitizeImages(html, asList((research || {}).images), brand);
+    html = ensureHeroVisual(html, asList((research || {}).images), brand);
     var css = buildBrandCss(brand);
     if (/<\/head\s*>/i.test(html)) html = html.replace(/<\/head\s*>/i, css + '\n</head>');
     else if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, '$&' + css);
@@ -184,5 +295,7 @@
 
   window.MEO.buildPagePrompt = buildPagePrompt;
   window.MEO.buildBrandCss = buildBrandCss;
+  window.MEO.ensureHeroVisual = ensureHeroVisual;
   window.MEO.runGenerate = runGenerate;
+  window.MEO.runGenerateRefined = runGenerateRefined;
 })();

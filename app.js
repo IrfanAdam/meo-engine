@@ -170,7 +170,8 @@ function setStep(name, state, sub) {
 }
 
 function resetSteps() {
-  ["research", "brand", "audit", "generate"].forEach((n) => setStep(n, "", "idle"));
+  ["research", "brand", "audit", "generate"].forEach((n) => { setStep(n, "", "idle"); });
+  document.querySelectorAll("#steps li").forEach((li) => { delete li.dataset.pass; });
 }
 
 // Live elapsed ticker for the running step: "calling gemini… 12s"
@@ -180,7 +181,8 @@ function tickStep(name, base) {
     const li = document.querySelector(`#steps li[data-step="${name}"]`);
     if (!li || li.dataset.state !== "active") { clearInterval(id); return; }
     const s = li.querySelector(".step-sub");
-    if (s) s.textContent = `${base} ${Math.round((Date.now() - t0) / 1000)}s…`;
+    const pass = li.dataset.pass ? " " + li.dataset.pass : "";
+    if (s) s.textContent = `${base} ${Math.round((Date.now() - t0) / 1000)}s…${pass}`;
   }, 1000);
   return () => clearInterval(id);
 }
@@ -197,29 +199,39 @@ function friendlyError(e) {
 }
 
 async function runPipeline(raw) {
-  // Tracks 1+3 truly in parallel, then audit (needs research), then generate.
+  // Each track iterates: draft -> critique -> revise (MEO_PASSES refine rounds).
+  // Research + brand run in parallel, then audit (needs research), then generate.
+  const PASSES = 1;
+  const TOTAL = PASSES + 2; // draft + critique + revise(s) visible as passes
   resetSteps();
-  const provider = getProvider();
-  setStep("research", "active", `calling ${getModel()}…`);
-  setStep("brand", "active", `calling ${getModel()}…`);
+  const passNote = (name) => (n, total) => {
+    const li = document.querySelector(`#steps li[data-step="${name}"]`);
+    if (li && li.dataset.state === "active") {
+      li.dataset.pass = `pass ${n}/${total}`;
+      const s = li.querySelector(".step-sub");
+      if (s) s.textContent = `calling ${getModel()}… pass ${n}/${total}`;
+    }
+  };
+  setStep("research", "active", `calling ${getModel()}… pass 1/${TOTAL}`);
+  setStep("brand", "active", `calling ${getModel()}… pass 1/${TOTAL}`);
   const stopR = tickStep("research", `calling ${getModel()}…`);
   const stopB = tickStep("brand", `calling ${getModel()}…`);
-  setStatus("Research + brand tracks running in parallel…");
-  const pR = window.MEO.runResearch(chatMessages, raw).then(
+  setStatus("Research + brand tracks running in parallel (draft → critique → revise)…");
+  const pR = window.MEO.runResearchRefined(chatMessages, raw, PASSES, passNote("research")).then(
     (r) => { stopR(); setStep("research", "done", `${(r.usps || []).length} USPs · ${(r.keywords || []).length} keywords`); return r; },
     (e) => { stopR(); setStep("research", "error", friendlyError(e)); throw e; }
   );
-  const pB = window.MEO.extractBrand(chatPrompt, raw).then(
+  const pB = window.MEO.extractBrandRefined(chatPrompt, raw, PASSES, passNote("brand")).then(
     (b) => { stopB(); setStep("brand", "done", (b.colors || []).slice(0, 3).join(" ") || "tokens parsed"); return b; },
     (e) => { stopB(); setStep("brand", "error", friendlyError(e)); throw e; }
   );
   const [research, brand] = await Promise.all([pR, pB]);
-  setStep("audit", "active", `scoring vs GEO/AEO checks…`);
+  setStep("audit", "active", `scoring vs GEO/AEO checks… pass 1/${TOTAL}`);
   const stopA = tickStep("audit", "scoring vs GEO/AEO checks…");
-  setStatus("Audit track running…");
+  setStatus("Audit track running (draft → critique → revise)…");
   let auditRaw;
   try {
-    auditRaw = await window.MEO.runAudit(chatMessages, raw, JSON.stringify(research).slice(0, 2000));
+    auditRaw = await window.MEO.runAuditRefined(chatMessages, raw, JSON.stringify(research).slice(0, 2000), PASSES, passNote("audit"));
     stopA();
     setStep("audit", "done", `score ${auditRaw.score} · ${auditRaw.checks.length} checks · ${auditRaw.keywords.length} keywords`);
   } catch (e) {
@@ -240,9 +252,9 @@ async function runPipeline(raw) {
   lastAudit = audit;
   setStep("generate", "active", "writing standalone HTML…");
   const stopG = tickStep("generate", "writing standalone HTML…");
-  setStatus("Generating optimized page…");
+  setStatus("Generating optimized page (draft → critique → revise)…");
   try {
-    lastGeneratedHtml = await window.MEO.runGenerate(chatPrompt, research, auditRaw, brand);
+    lastGeneratedHtml = await window.MEO.runGenerateRefined(chatPrompt, research, auditRaw, brand, PASSES, passNote("generate"));
     stopG();
     setStep("generate", "done", `${(lastGeneratedHtml.length / 1024).toFixed(1)} KB page ready`);
   } catch (e) {
@@ -250,7 +262,7 @@ async function runPipeline(raw) {
     setStep("generate", "error", friendlyError(e));
     throw e;
   }
-  setStatus(`Done — live ${provider} run. Open in new tab or Export the generated page.`);
+  setStatus(`Done — live ${getProvider()} run. Open in new tab or Export the generated page.`);
 }
 
 $("provider").addEventListener("change", () => {

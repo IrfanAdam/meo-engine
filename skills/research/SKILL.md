@@ -31,3 +31,4 @@ Collect: key facts, 3-5 USPs, 3-5 competitors, SEO keywords, 3-5 image ideas.
 - Output valid JSON only, no markdown fences.
 - At least 3 facts, 3 USPs, 3 competitors, 5 keywords, 3 image ideas.
 - Empty field -> use [] or "" never null.
+- Multi-pass: draft -> critique -> revise; never regress below 3 USPs.

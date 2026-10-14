@@ -16,9 +16,7 @@ window.MEO.buildResearchPrompt = function buildResearchPrompt(input) {
   );
 };
 
-window.MEO.runResearch = async function runResearch(chatFn, input) {
-  var prompt = window.MEO.buildResearchPrompt(input);
-  var text = await chatFn([{ role: "user", content: prompt }]);
+window.MEO.parseResearch = function parseResearch(text) {
   var raw = String(text);
   var jsonText = null;
   var fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -46,4 +44,37 @@ window.MEO.runResearch = async function runResearch(chatFn, input) {
     if (!Array.isArray(parsed[k])) parsed[k] = [];
   });
   return parsed;
+};
+
+window.MEO.runResearch = async function runResearch(chatFn, input) {
+  var prompt = window.MEO.buildResearchPrompt(input);
+  var text = await chatFn([{ role: "user", content: prompt }]);
+  return window.MEO.parseResearch(text);
+};
+
+// Multi-pass: draft -> critique -> revise. Keeps the best valid draft.
+// passes = number of revise rounds after the draft. onPass(n, total) progress hook.
+window.MEO.runResearchRefined = async function runResearchRefined(chatFn, input, passes, onPass) {
+  passes = passes == null ? 1 : passes;
+  var prompt = window.MEO.buildResearchPrompt(input);
+  var draftText = await chatFn([{ role: "user", content: prompt }]);
+  var best = window.MEO.parseResearch(draftText);
+  if (onPass) onPass(1, passes + 1);
+  for (var i = 0; i < passes; i++) {
+    var critique = await chatFn([{
+      role: "user",
+      content: window.MEO.buildCritiquePrompt("research", JSON.stringify(best).slice(0, 4000)),
+    }]);
+    if (/^\s*PASS\s*$/i.test(String(critique))) { if (onPass) onPass(i + 2, passes + 1); break; }
+    var revised = await chatFn([{
+      role: "user",
+      content: window.MEO.buildRevisePrompt("research", prompt, JSON.stringify(best), critique),
+    }]);
+    try {
+      var cand = window.MEO.parseResearch(revised);
+      if (cand.usps.length >= 3) best = cand; // quality gate: never regress below 3 USPs
+    } catch (e) { /* keep previous best */ }
+    if (onPass) onPass(i + 2, passes + 1);
+  }
+  return best;
 };
