@@ -170,7 +170,7 @@ function setStep(name, state, sub) {
 }
 
 function resetSteps() {
-  ["research", "brand", "audit", "generate"].forEach((n) => { setStep(n, "", "idle"); });
+  ["research", "brand", "images", "audit", "generate"].forEach((n) => { setStep(n, "", "idle"); });
   document.querySelectorAll("#steps li").forEach((li) => { delete li.dataset.pass; });
 }
 
@@ -225,14 +225,18 @@ async function runPipeline(raw) {
     (b) => { stopB(); setStep("brand", "done", (b.colors || []).slice(0, 3).join(" ") || "tokens parsed"); return b; },
     (e) => { stopB(); setStep("brand", "error", friendlyError(e)); throw e; }
   );
-  // Auto image track: page photos when input has a URL, else research supplies URLs.
+  // Auto image track: page photos when input has a URL, else real photo search.
   const pageUrl = detectUrl(raw);
+  setStep("images", "active", pageUrl ? "fetching page photos…" : "waiting on research…");
   $("imgStatus").textContent = pageUrl ? "Auto-fetching page images…" : "Research will supply product image URLs…";
   const pI = (async () => {
     if (!pageUrl) return [];
     try {
-      return (await window.MEO.fetchPageImages(pageUrl)).map((im) => im.src);
+      const found = (await window.MEO.fetchPageImages(pageUrl)).map((im) => im.src);
+      setStep("images", "active", `found ${found.length} page photos…`);
+      return found;
     } catch (e) {
+      setStep("images", "active", "page blocked — using photo search…");
       $("imgStatus").textContent = "Page images blocked — falling back to research image URLs.";
       return [];
     }
@@ -242,10 +246,12 @@ async function runPipeline(raw) {
   let commonsImgs = [];
   if (!pageImgs.length) {
     const [q1, q2] = window.MEO.commonsQueries(research, raw);
+    setStep("images", "active", `finding real photos (${q1})…`);
     $("imgStatus").textContent = `Finding real photos (${q1})…`;
     try {
       commonsImgs = await window.MEO.searchCommonsImages(q1, 4);
       if (commonsImgs.length < 2 && q2 !== q1) {
+        setStep("images", "active", `too few — retrying (${q2})…`);
         commonsImgs = await window.MEO.searchCommonsImages(q2, 4);
       }
     } catch (e) { commonsImgs = []; }
@@ -258,11 +264,12 @@ async function runPipeline(raw) {
     const url = typeof u === "string" ? u : u.src;
     if (url && !seen[url]) { seen[url] = true; merged.push(url); }
   });
+  setStep("images", "active", `verifying ${merged.length} URLs…`);
   $("imgStatus").textContent = `Verifying ${merged.length} image URLs…`;
   research.images = await window.MEO.verifyImages(merged);
-  $("imgStatus").textContent = research.images.length
-    ? `${research.images.length} verified image${research.images.length > 1 ? "s" : ""} will be used.`
-    : "No loadable images found — page will use brand visuals.";
+  setStep("images", "done", research.images.length
+    ? `${research.images.length} verified image${research.images.length > 1 ? "s" : ""}`
+    : "no photos — brand visuals");
   setStep("audit", "active", `scoring vs GEO/AEO checks… pass 1/${TOTAL}`);
   const stopA = tickStep("audit", "scoring vs GEO/AEO checks…");
   setStatus("Audit track running (draft → critique → revise)…");
