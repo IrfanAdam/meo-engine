@@ -238,11 +238,23 @@ async function runPipeline(raw) {
     }
   })();
   const [research, brand, pageImgs] = await Promise.all([pR, pB, pI]);
-  // Merge: page photos first, then research URLs — then load-verify so only
-  // images that actually render reach the page.
+  // Commons fallback: real photos by keyword when the page gave none.
+  let commonsImgs = [];
+  if (!pageImgs.length) {
+    const [q1, q2] = window.MEO.commonsQueries(research, raw);
+    $("imgStatus").textContent = `Finding real photos (${q1})…`;
+    try {
+      commonsImgs = await window.MEO.searchCommonsImages(q1, 4);
+      if (commonsImgs.length < 2 && q2 !== q1) {
+        commonsImgs = await window.MEO.searchCommonsImages(q2, 4);
+      }
+    } catch (e) { commonsImgs = []; }
+  }
+  // Merge: page photos first, then Commons photos, then research URLs — then
+  // load-verify so only images that actually render reach the page.
   const merged = [];
   const seen = {};
-  pageImgs.concat(research.images || []).forEach((u) => {
+  pageImgs.concat(commonsImgs, research.images || []).forEach((u) => {
     const url = typeof u === "string" ? u : u.src;
     if (url && !seen[url]) { seen[url] = true; merged.push(url); }
   });

@@ -76,6 +76,75 @@ window.MEO.fetchPageImages = async function (pageUrl) {
   return found;
 };
 
+// Wikimedia Commons fallback: real, hotlink-friendly photos by keyword.
+// No key, CORS-open (origin=*), reliable for demo-grade visuals.
+window.MEO.searchCommonsImages = async function (query, limit) {
+  var q = String(query || "").trim();
+  if (!q) return [];
+  var n = limit || 4;
+  var api = "https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*" +
+    "&generator=search&gsrsearch=" + encodeURIComponent(q) +
+    "&gsrnamespace=6&gsrlimit=" + n +
+    "&prop=imageinfo&iiprop=url|size&iiurlwidth=800";
+  var ctrl = new AbortController();
+  var timer = setTimeout(function () { ctrl.abort(); }, 25000);
+  var res;
+  try {
+    res = await fetch(api, { signal: ctrl.signal });
+  } catch (e) {
+    clearTimeout(timer);
+    return [];
+  }
+  clearTimeout(timer);
+  if (!res.ok) return [];
+  var data;
+  try { data = await res.json(); } catch (e) { return []; }
+  var pages = (data.query && data.query.pages) || {};
+  var cands = [];
+  Object.keys(pages).forEach(function (k) {
+    var info = (pages[k].imageinfo || [])[0];
+    var url = (info && info.thumburl && info.width >= 400) ? info.thumburl : (info && info.url);
+    if (!url) return;
+    // skip multi-page documents and scans, not product photos
+    if (/\/page\d+[-_]|\.(pdf|tiff?|djvu)(\?|$)/i.test(url)) return;
+    var title = String(pages[k].title || "");
+    // drop risky/irrelevant subjects — demo safety first
+    if (/(nude|naked|sex|dead|corpse|war|protest|accident|crime|funeral)/i.test(title)) return;
+    cands.push({ url: url, title: title });
+  });
+  // prefer shots whose title names the actual product noun (last query word)
+  var noun = String(q).split(/\s+/).pop().toLowerCase();
+  cands.sort(function (a, b) {
+    return (b.title.toLowerCase().indexOf(noun) !== -1) - (a.title.toLowerCase().indexOf(noun) !== -1);
+  });
+  return cands.slice(0, n).map(function (c) { return c.url; });
+};
+
+// Query pair from the raw input's product-name head (text before any
+// dash/colon), USP prose as fallback. Returns [primary, fallback].
+window.MEO.commonsQueries = function (research, rawInput) {
+  var units = /^(liters?|litre?s?|ml|kg|g|oz|inch(es)?|cm|mm|gb|tb|watt?s?|pack|set|pcs?)$/i;
+  function wordsOf(s) {
+    return String(s || "")
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/[$€£₹]\s*[\d.,]+/g, "")
+      .split(/[^A-Za-z]+/)
+      .filter(function (w) { return w.length > 2 && !/\d/.test(w) && !units.test(w); });
+  }
+  var head = String(rawInput || "").split(/[—–\-—|:;\n]/)[0];
+  var words = wordsOf(head);
+  if (words.length < 2) words = wordsOf(research && research.usps && research.usps[0]);
+  var primary = words.slice(-2).join(" ");
+  var fallback = words.slice(-1).join(" ");
+  return [primary, fallback];
+};
+
+// Short Commons-friendly query from research + raw input: last two
+// content words (usually modifier + product noun, e.g. "hiking backpack").
+window.MEO.commonsQuery = function (research, rawInput) {
+  return window.MEO.commonsQueries(research, rawInput)[0];
+};
+
 // Keep only URLs that actually load in the browser (kills hallucinated URLs).
 // Returns a Promise of the loadable subset, capped at 6, order preserved.
 window.MEO.verifyImages = function (urls, timeoutMs) {

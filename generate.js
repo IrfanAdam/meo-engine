@@ -83,6 +83,7 @@
       : '- Use ZERO <img> tags. For product visuals use inline <svg> blocks (gradients/shapes) filled with the brand tokens above.');
     lines.push(
       '- NEVER invent, guess, or hotlink image URLs (no unsplash/picsum/placeholder CDNs).',
+      '- Image priority: FIRST image URL = hero <img> inside .hero-media; remaining URLs in a <div class="gallery"> grid after the proof section.',
       '',
       'LAYOUT (exact skeleton — every generated page follows this structure):',
       '<div class="wrap">',
@@ -91,6 +92,7 @@
       '    <div class="hero-media"> ONE visual: allow-listed <img> or inline <svg> only </div>',
       '  </header>',
       '  <section class="proof"> 3 trust bullets (shipping / returns / warranty) </section>',
+      '  <div class="gallery"> remaining images as <img> grid (omit div if only one image) </div>',
       '  <section class="specs"> <h2>Specifications</h2> + <table> of spec rows </section>',
       '  <section class="faq"> <h2>FAQ</h2> + 3 or more question/answer pairs (mirror the FAQ JSON-LD) </section>',
       '  <footer> brand line </footer>',
@@ -135,18 +137,30 @@
     var bg = colors[1] || colors[0] || '#ffffff';
     var ink = colors[0] || '#1a1a1a';
     var accent = colors[2] || colors[0] || '#1a1a1a';
+    var muted = colors[3] || '#6b7280';
     var stack = fonts.length ? fonts.join(', ') : 'system-ui, sans-serif';
+    // This CSS loads AFTER the model's own <style>, so it wins on conflicts.
     return '<style>/* MEO brand tokens + layout */\n:root { ' + vars + ' --f0: ' + stack + '; }\n' +
-      'body { font-family: var(--f0); background: ' + bg + '; color: ' + ink + '; margin: 0; }\n' +
-      'h1, h2, h3 { color: ' + ink + '; }\n' +
-      'a, button, .cta { background: ' + accent + '; }\n' +
-      '.wrap { max-width: 1100px; margin: 0 auto; padding: 32px 20px 64px; }\n' +
-      '.hero { display: grid; grid-template-columns: 56fr 44fr; gap: 32px; align-items: center; margin-bottom: 40px; }\n' +
-      '.hero-media svg, .hero-media img { width: 100%; height: auto; border-radius: 12px; display: block; }\n' +
-      '.proof { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 40px; }\n' +
-      '.specs table { width: 100%; border-collapse: collapse; margin-bottom: 40px; }\n' +
-      '.specs th, .specs td { text-align: left; padding: 10px 12px; border-bottom: 1px solid ' + ink + '22; }\n' +
-      '.faq h3 { margin-bottom: 4px; }\n' +
+      'body { font-family: var(--f0); background: ' + bg + '; color: ' + ink + '; margin: 0; line-height: 1.6; }\n' +
+      '.wrap { max-width: 1100px; margin: 0 auto; padding: 40px 24px 72px; }\n' +
+      '.hero { display: grid; grid-template-columns: 56fr 44fr; gap: 40px; align-items: center; margin-bottom: 48px; }\n' +
+      '.hero h1 { font-size: clamp(28px, 4vw, 44px); line-height: 1.15; margin: 0 0 12px; }\n' +
+      '.hero .rating { color: ' + accent + '; font-weight: 700; letter-spacing: 1px; }\n' +
+      '.hero .price { font-size: 28px; font-weight: 800; margin: 12px 0; }\n' +
+      '.hero .buy-btn, .hero .cta, a.buy-btn, button.buy-btn { display: inline-block; background: ' + accent + '; color: #fff; padding: 14px 32px; border-radius: 10px; font-weight: 700; text-decoration: none; border: 0; margin-top: 16px; }\n' +
+      '.hero-media svg, .hero-media img { width: 100%; height: auto; border-radius: 14px; display: block; }\n' +
+      '.proof { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 48px; }\n' +
+      '.proof-item, .proof > div { background: #ffffff; border: 1px solid ' + ink + '18; border-radius: 12px; padding: 20px; text-align: center; font-weight: 600; }\n' +
+      '.specs { margin-bottom: 48px; }\n' +
+      '.specs h2, .faq h2, .gallery h2 { font-size: 24px; margin-bottom: 16px; }\n' +
+      '.specs table { width: 100%; border-collapse: collapse; background: #ffffff; border-radius: 12px; overflow: hidden; }\n' +
+      '.specs th, .specs td { text-align: left; padding: 12px 16px; border-bottom: 1px solid ' + ink + '14; }\n' +
+      '.specs tr:nth-child(even) td { background: ' + ink + '08; }\n' +
+      '.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-bottom: 48px; }\n' +
+      '.gallery img { width: 100%; height: 200px; object-fit: cover; border-radius: 12px; }\n' +
+      '.faq-item, .faq > div { margin-bottom: 16px; }\n' +
+      '.faq h3 { margin: 0 0 6px; font-size: 17px; }\n' +
+      'footer { margin-top: 56px; padding-top: 24px; border-top: 1px solid ' + ink + '22; color: ' + muted + '; font-size: 14px; }\n' +
       '@media (max-width: 800px) { .hero { grid-template-columns: 1fr; } .proof { grid-template-columns: 1fr; } }\n</style>';
   }
 
