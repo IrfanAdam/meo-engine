@@ -7,8 +7,10 @@ Auto-resolve fitting, loadable product photos: page extraction first, photo-sear
 ## Pipeline
 ```
 page URL? -> fetchPageImages (og:image + <img>, chrome filtered)
-  : resolveProductImages (search -> LLM judge 0-2 -> corrected re-search, max 3 rounds)
-merge (page > searched > research URLs) -> verifyImages (browser load test) -> research.images
+  : huntImages — hunter subagent, up to 5 rounds across Commons + Openverse:
+    search -> LLM judge scores 0-2 -> keep ONLY exact-fit (2)
+    -> judge-suggested + built-in query variations re-searched
+merge (page > hunted > research URLs) -> verifyImages (browser load test) -> research.images
 ```
 
 ## Output contract

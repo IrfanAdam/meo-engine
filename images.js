@@ -156,35 +156,91 @@ window.MEO.judgeImages = async function (chatFn, product, cands) {
   }
 };
 
-// Recursive correction loop: search -> judge -> corrected re-search, until
-// enough fitting photos (or rounds exhausted). Returns verified-fit URLs.
-window.MEO.resolveProductImages = async function (rawInput, research, chatFn, onPhase) {
+// Openverse (WordPress photo library): second source, no key, CORS-open.
+// Anonymous rate limits are tight — failure returns [] and Commons carries on.
+window.MEO.searchOpenverseWithTitles = async function (query, limit) {
+  var q = String(query || "").trim();
+  if (!q) return [];
+  var api = "https://api.openverse.org/v1/images/?q=" + encodeURIComponent(q) +
+    "&page_size=" + (limit || 8) + "&filter_dead=true&license_type=all";
+  var ctrl = new AbortController();
+  var timer = setTimeout(function () { ctrl.abort(); }, 25000);
+  var res;
+  try {
+    res = await fetch(api, { signal: ctrl.signal });
+  } catch (e) {
+    clearTimeout(timer);
+    return [];
+  }
+  clearTimeout(timer);
+  if (!res.ok) return [];
+  var data;
+  try { data = await res.json(); } catch (e) { return []; }
+  var out = [];
+  ((data && data.results) || []).forEach(function (r) {
+    if (!r.url || !/^https?:\/\//i.test(r.url)) return;
+    var title = String(r.title || "").replace(/_/g, " ");
+    if (/(nude|naked|sex|dead|corpse|war|protest|accident|crime|funeral)/i.test(title)) return;
+    out.push({ url: r.url, title: title || "untitled photo" });
+  });
+  return out;
+};
+
+// Hunter subagent: exhaustive multi-source photo hunt. Strategies in order —
+// Commons, Commons variations, Openverse, judge-suggested re-queries — up to
+// 5 rounds. Keeps ONLY exact-fit photos (judge score 2); settles for related
+// (score 1) only if no exact fit exists after all rounds. Never returns
+// wrong-subject photos.
+window.MEO.huntImages = async function (rawInput, research, chatFn, onPhase) {
   var MEO = window.MEO;
   var product = MEO.productName(rawInput);
-  var queries = MEO.commonsQueries(research, rawInput);
-  var kept = [];
+  var pair = MEO.commonsQueries(research, rawInput);
+  var queue = [pair[0], pair[0] + " product", pair[1]];
+  var tried = {};
+  var twos = [];
+  var ones = [];
   var seen = {};
-  var rounds = 3;
-  for (var r = 0; r < rounds && kept.length < 3; r++) {
-    var q = queries[0];
-    if (onPhase) onPhase("searching photos (" + q + ")… round " + (r + 1));
-    var cands = await MEO.searchCommonsWithTitles(q, 4);
-    var fresh = cands.filter(function (c) { return !seen[c.url]; });
-    if (!fresh.length) break;
+  var rounds = 5;
+  for (var r = 0; r < rounds && twos.length < 3; r++) {
+    var q = null;
+    while (queue.length) {
+      var cand = queue.shift().trim();
+      if (cand && !tried[cand.toLowerCase()]) { q = cand; break; }
+    }
+    if (!q) break;
+    tried[q.toLowerCase()] = true;
+    if (onPhase) onPhase("hunting photos (" + q + ")… round " + (r + 1) + "/" + rounds);
+    var found = await MEO.searchCommonsWithTitles(q, 6);
+    if (found.length < 3) {
+      try {
+        var ov = await MEO.searchOpenverseWithTitles(q, 6);
+        ov.forEach(function (c) { found.push(c); });
+      } catch (e) { /* Commons results stand */ }
+    }
+    var fresh = found.filter(function (c) { return !seen[c.url]; });
+    if (!fresh.length) continue;
     fresh.forEach(function (c) { seen[c.url] = true; });
-    if (onPhase) onPhase("checking " + fresh.length + " photos vs product… round " + (r + 1));
+    if (onPhase) onPhase("checking " + fresh.length + " photos vs product… round " + (r + 1) + "/" + rounds);
     var judged = await MEO.judgeImages(chatFn, product, fresh);
     var byScore = {};
     (judged.scores || []).forEach(function (s) { byScore[s.i] = s.score; });
-    // fail-open: if judge output unusable, keep noun-matching fresh candidates
-    var usable = judged.scores.length ? fresh.filter(function (_, i) { return byScore[i] >= 1; }) : fresh;
-    usable.sort(function (a, b) { return (byScore[fresh.indexOf(b)] || 0) - (byScore[fresh.indexOf(a)] || 0); });
-    usable.forEach(function (c) { if (kept.length < 4) kept.push(c.url); });
+    if (!judged.scores.length) continue; // judge failed — next strategy, keep nothing
+    fresh.forEach(function (c, i) {
+      if (byScore[i] === 2 && twos.length < 4) twos.push(c.url);
+      else if (byScore[i] === 1 && ones.length < 4) ones.push(c.url);
+    });
     var next = (judged.betterQuery || "").trim();
-    if (kept.length >= 3 || !next || r === rounds - 1) break;
-    queries = [next, queries[1]];
+    if (next && !tried[next.toLowerCase()]) queue.unshift(next);
+    if (onPhase) onPhase(twos.length + " exact-fit" + (ones.length ? ", " + ones.length + " related" : "") + " so far…");
   }
-  if (onPhase) onPhase(kept.length ? kept.length + " fitting photos" : "no fitting photos");
+  var kept = twos.slice(0, 4);
+  var fallbackNote = "";
+  if (kept.length < 2 && ones.length) {
+    // honest fallback: related beats empty, flagged as such
+    while (kept.length < 4 && ones.length) kept.push(ones.shift());
+    fallbackNote = " (related, not exact)";
+  }
+  if (onPhase) onPhase(kept.length ? kept.length + " photos kept" + fallbackNote : "no fitting photos");
   return kept;
 };
 

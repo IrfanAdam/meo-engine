@@ -242,8 +242,8 @@ async function runPipeline(raw) {
     }
   })();
   const [research, brand, pageImgs] = await Promise.all([pR, pB, pI]);
-  // Recursive correction: search -> LLM judge -> corrected re-search until
-  // photos actually fit the product. Runs before audit/generate.
+  // Hunter subagent: exhaustive multi-source photo hunt with relevance
+  // judging. Runs before audit/generate; wrong-subject photos never pass.
   let commonsImgs = [];
   if (!pageImgs.length) {
     const phase = (t) => {
@@ -251,7 +251,7 @@ async function runPipeline(raw) {
       $("imgStatus").textContent = t.charAt(0).toUpperCase() + t.slice(1);
     };
     try {
-      commonsImgs = await window.MEO.resolveProductImages(raw, research, chatPrompt, phase);
+      commonsImgs = await window.MEO.huntImages(raw, research, chatPrompt, phase);
     } catch (e) { commonsImgs = []; }
   }
   // Merge: page photos first, then Commons photos, then research URLs — then
