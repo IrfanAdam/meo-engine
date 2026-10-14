@@ -38,6 +38,13 @@
         <input id="apiKey" type="password" placeholder="API key (stored in this browser only)" autocomplete="off" />
       </div>
       <p class="hint" id="status">No API key — runs mock audit. Add a key for live research + audit + page generation.</p>
+      <div class="row">
+        <button id="fetchImages" type="button">Fetch images from URL</button>
+      </div>
+      <p class="hint" id="imgStatus">Tip: paste a product URL above, fetch its images — or paste image URLs below (one per line).</p>
+      <div id="imgPicker" class="picker"></div>
+      <label for="manualImages">Image URLs (optional, one per line)</label>
+      <textarea id="manualImages" rows="2" placeholder="https://…/hero.jpg"></textarea>
       <button id="run">Run MEO audit</button>
       <ol id="steps">
         <li data-step="research"><span class="dot"></span><div><strong>Research</strong><small class="task-sub">Extracts product facts, USPs, competitors, keywords</small><small class="step-sub">idle</small></div></li>
@@ -77,11 +84,12 @@
   <script src="providers/openai.js?v=9"></script>
   <script src="providers/anthropic.js?v=9"></script>
   <script src="providers/chat.js?v=9"></script>
-  <script src="refine.js?v=10"></script>
-  <script src="research.js?v=10"></script>
-  <script src="audit.js?v=10"></script>
-  <script src="brand.js?v=10"></script>
-  <script src="generate.js?v=10"></script>
-  <script src="app.js?v=10"></script>
+  <script src="refine.js?v=11"></script>
+  <script src="images.js?v=11"></script>
+  <script src="research.js?v=11"></script>
+  <script src="audit.js?v=11"></script>
+  <script src="brand.js?v=11"></script>
+  <script src="generate.js?v=11"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

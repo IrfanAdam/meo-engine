@@ -226,6 +226,9 @@ async function runPipeline(raw) {
     (e) => { stopB(); setStep("brand", "error", friendlyError(e)); throw e; }
   );
   const [research, brand] = await Promise.all([pR, pB]);
+  // User-picked/manual images win over model-guessed ones (real photos beat SVG).
+  const userImgs = selectedImages();
+  if (userImgs.length) research.images = userImgs;
   setStep("audit", "active", `scoring vs GEO/AEO checks… pass 1/${TOTAL}`);
   const stopA = tickStep("audit", "scoring vs GEO/AEO checks…");
   setStatus("Audit track running (draft → critique → revise)…");
@@ -265,6 +268,56 @@ async function runPipeline(raw) {
   setStatus(`Done — live ${getProvider()} run. Open in new tab or Export the generated page.`);
 }
 
+function selectedImages() {
+  const checked = Array.from(document.querySelectorAll("#imgPicker input:checked"))
+    .map((c) => c.value).filter(Boolean);
+  const manual = $("manualImages").value.split("\n").map((s) => s.trim()).filter(Boolean);
+  const seen = {};
+  return checked.concat(manual).filter((u) => {
+    if (seen[u]) return false;
+    seen[u] = true;
+    return /^https?:\/\//i.test(u);
+  });
+}
+
+function renderPicker(found) {
+  const box = $("imgPicker");
+  box.innerHTML = "";
+  found.forEach((im, i) => {
+    const lab = document.createElement("label");
+    if (i < 3) lab.classList.add("picked");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = im.src;
+    cb.checked = i < 3; // first 3 pre-selected (og:image usually first)
+    cb.addEventListener("change", () => lab.classList.toggle("picked", cb.checked));
+    const img = document.createElement("img");
+    img.src = im.src;
+    img.alt = im.alt || "product image";
+    img.loading = "lazy";
+    lab.appendChild(cb);
+    lab.appendChild(img);
+    lab.title = im.src;
+    box.appendChild(lab);
+  });
+}
+
+$("fetchImages").addEventListener("click", async () => {
+  const raw = $("input").value.trim();
+  const url = (raw.match(/https?:\/\/[^\s]+/i) || [])[0] || "";
+  if (!url) {
+    $("imgStatus").textContent = "Paste a product URL in the box above first — or paste image URLs manually below.";
+    return;
+  }
+  $("imgStatus").textContent = "Fetching images…";
+  try {
+    const found = await window.MEO.fetchPageImages(url);
+    renderPicker(found);
+    $("imgStatus").textContent = `Found ${found.length} images — first 3 pre-selected, click to change.`;
+  } catch (e) {
+    $("imgStatus").textContent = e && e.message ? e.message : String(e);
+  }
+});
 $("provider").addEventListener("change", () => {
   try {
     fillModels(localStorage.getItem("meo.model." + getProvider()));
